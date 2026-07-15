@@ -4,22 +4,22 @@ title: "EDR Explained | MostShittyEDR"
 permalink: /edr-explained/
 ---
 
-# EDR Explained — Endpoint Detection & Response
+# EDR Explained: Endpoint Detection & Response
 
-Modern EDR solutions are the frontline defense against advanced threats on endpoints. They combine multiple detection layers — from user-mode hooking to kernel-level telemetry — to identify and respond to malicious activity in real time. This page explains how they work, why they're effective, and where their weaknesses lie.
+Modern EDR solutions are the frontline defense against advanced threats on endpoints. They combine multiple detection layers, from user-mode hooking to kernel-level telemetry, to identify and respond to malicious activity in real time. This page explains how they work, why they're effective, and where their weaknesses lie.
 
 * * *
 
 ## What is an EDR?
 
-An **Endpoint Detection & Response (EDR)** system is a security solution that continuously monitors endpoint activity, collects telemetry, and applies detection logic to identify threats. Unlike traditional antivirus (signature-only), EDRs combine behavioral analysis, kernel-level visibility, and centralized correlation to detect attacks that signatures miss.
+An **Endpoint Detection & Response (EDR)** system is a security solution that continuously monitors endpoint activity, collects telemetry, and applies detection logic to identify threats. Unlike traditional antivirus that relies solely on signatures, EDRs combine behavioral analysis, kernel-level visibility, and centralized correlation to detect attacks that signatures miss.
 
 **Key differences from traditional AV:**
 
-- **AV** scans files at rest — EDR monitors behavior in real time
-- **AV** relies on known signatures — EDR uses behavioral heuristics and correlation
-- **AV** operates mostly in user-space — EDR hooks deep into the kernel
-- **AV** blocks or quarantines — EDR detects, responds, AND provides forensic context
+- **AV** scans files at rest, while **EDR** monitors behavior in real time
+- **AV** relies on known signatures, while **EDR** uses behavioral heuristics and correlation
+- **AV** operates mostly in user-space, while **EDR** hooks deep into the kernel
+- **AV** blocks or quarantines, while **EDR** detects, responds, AND provides forensic context
 
 * * *
 
@@ -36,42 +36,43 @@ A typical enterprise EDR consists of four core components working together:
 
 ### High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        EDR Backend / Cloud                        │
-│         (Correlation Engine, Threat Intelligence, UI)             │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ Telemetry Upload
-                                │ Policy Updates
-┌───────────────────────────────┴─────────────────────────────────┐
-│                         EDR Agent (User-Mode)                    │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
-│  │  Detection   │  │  Response    │  │  Telemetry Collector   │  │
-│  │  Engine      │  │  Actions     │  │  & Forwarder           │  │
-│  └─────────────┘  └──────────────┘  └────────────────────────┘  │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │
-┌───────────────────────────────┴─────────────────────────────────┐
-│                      Kernel-Mode Components                      │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
-│  │  Process     │  │  Filesystem  │  │  ETW Threat            │  │
-│  │  Callbacks   │  │  Minifilter  │  │  Intelligence          │  │
-│  └─────────────┘  └──────────────┘  └────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Cloud["EDR Backend / Cloud"]
+        CE[Correlation Engine]
+        TI[Threat Intelligence]
+        UI[Management UI]
+    end
+
+    subgraph Agent["EDR Agent (User-Mode)"]
+        DE[Detection Engine]
+        RA[Response Actions]
+        TC[Telemetry Collector & Forwarder]
+    end
+
+    subgraph Kernel["Kernel-Mode Components"]
+        PC[Process Callbacks]
+        MF[Filesystem Minifilter]
+        ETW[ETW Threat Intelligence]
+    end
+
+    Kernel -->|Raw Events| Agent
+    Agent -->|Telemetry Upload| Cloud
+    Cloud -->|Policy Updates| Agent
 ```
 
 * * *
 
 ## How Detection Works (Step by Step)
 
-1. **Event occurs** — A process is created, a file is written, or a network connection is opened
-2. **Kernel sensor fires** — A registered callback or minifilter captures the raw event
-3. **Telemetry is generated** — The event is normalized into a structured data point
-4. **Agent receives telemetry** — The user-mode agent collects events from all sensors
-5. **Detection logic runs** — Rules, heuristics, and ML models evaluate the event in context
-6. **Verdict is reached** — Clean, suspicious, or malicious
-7. **Response executes** — Alert, block, quarantine, isolate, or kill the process
-8. **Telemetry is forwarded** — Events (and verdicts) are sent to the cloud backend for correlation
+1. **Event occurs:** A process is created, a file is written, or a network connection is opened
+2. **Kernel sensor fires:** A registered callback or minifilter captures the raw event
+3. **Telemetry is generated:** The event is normalized into a structured data point
+4. **Agent receives telemetry:** The user-mode agent collects events from all sensors
+5. **Detection logic runs:** Rules, heuristics, and ML models evaluate the event in context
+6. **Verdict is reached:** Clean, suspicious, or malicious
+7. **Response executes:** Alert, block, quarantine, isolate, or kill the process
+8. **Telemetry is forwarded:** Events and verdicts are sent to the cloud backend for correlation
 
 * * *
 
@@ -85,21 +86,21 @@ Windows provides kernel notification routines that fire on every process/thread 
 
 | Callback | Purpose |
 |----------|---------|
-| `PsSetCreateProcessNotifyRoutineEx` | Notified on every process creation/exit — can block creation |
+| `PsSetCreateProcessNotifyRoutineEx` | Notified on every process creation/exit, with the ability to block creation |
 | `PsSetCreateThreadNotifyRoutine` | Notified on every thread creation/exit |
 | `PsSetLoadImageNotifyRoutine` | Notified on every image (DLL/EXE) load |
 | `ObRegisterCallbacks` | Intercepts handle operations (e.g., protect LSASS handles) |
 | `CmRegisterCallbackEx` | Monitors registry operations |
 
-These callbacks fire **in kernel context** — they cannot be evaded by user-mode techniques alone.
+These callbacks fire **in kernel context**, meaning they cannot be evaded by user-mode techniques alone.
 
 ### Filesystem Minifilters
 
 Minifilters monitor all filesystem I/O through the Filter Manager framework:
 
-- **Pre-operation callbacks** — Inspect/block operations before they execute
-- **Post-operation callbacks** — Inspect results after completion
-- **Altitude-based ordering** — Numerical altitude determines execution order
+- **Pre-operation callbacks** inspect and can block operations before they execute
+- **Post-operation callbacks** inspect results after completion
+- **Altitude-based ordering** uses a numerical altitude to determine execution order
 
 **Common EDR minifilter altitudes:**
 
@@ -115,8 +116,8 @@ Minifilters monitor all filesystem I/O through the Filter Manager framework:
 
 **Event Tracing for Windows (ETW)** provides high-fidelity telemetry directly from the kernel:
 
-- `Microsoft-Windows-Threat-Intelligence` — Fires on memory allocation, process hollowing, code injection
-- Operates from `ntoskrnl.exe` kernel callbacks — immune to user-mode tampering
+- `Microsoft-Windows-Threat-Intelligence` fires on memory allocation, process hollowing, and code injection
+- Operates from `ntoskrnl.exe` kernel callbacks and is immune to user-mode tampering
 - Cannot be disabled without kernel-level access (unlike regular ETW sessions)
 
 * * *
@@ -127,32 +128,28 @@ EDRs inject DLLs into every process and hook critical Windows API functions in `
 
 ### How Hooking Works
 
-```
-Normal execution:              Hooked execution:
-─────────────────              ──────────────────
+```mermaid
+graph LR
+    subgraph Normal["Normal Execution"]
+        A1[Application] --> N1[NtWriteVirtualMemory]
+        N1 --> S1["mov r10, rcx<br/>mov eax, 0x3A<br/>syscall<br/>ret"]
+        S1 --> K1[Kernel]
+    end
 
-Application                    Application
-    │                              │
-    ▼                              ▼
-NtWriteVirtualMemory           NtWriteVirtualMemory
-    │                              │
-    ▼                              ▼
-mov r10, rcx                   jmp EDR_Hook ──────┐
-mov eax, 0x3A                      │              │
-syscall                            │              ▼
-ret                                │         EDR Analysis
-                                   │         (inspect args)
-                                   │              │
-                                   │              ▼
-                                   │         Execute original
-                                   ◄──────── syscall stub
+    subgraph Hooked["Hooked Execution"]
+        A2[Application] --> N2[NtWriteVirtualMemory]
+        N2 --> J["jmp EDR_Hook"]
+        J --> EDR["EDR Analysis<br/>(inspect args)"]
+        EDR --> O["Execute original<br/>syscall stub"]
+        O --> K2[Kernel]
+    end
 ```
 
 ### Hooking Methods
 
 | Method | Technique | Detection Scope |
 |--------|-----------|-----------------|
-| **Inline Hooking** | Overwrites first bytes of ntdll functions with `jmp` to EDR code | Most common — intercepts all calls through ntdll |
+| **Inline Hooking** | Overwrites first bytes of ntdll functions with `jmp` to EDR code | Most common; intercepts all calls through ntdll |
 | **IAT Hooking** | Modifies Import Address Table entries | Catches statically linked imports only |
 | **Hardware Breakpoints** | Uses CPU debug registers (DR0-DR3) | Stealthy, limited to 4 breakpoints |
 | **Trampoline Hooks** | Redirects via allocated code caves | Common variant of inline hooking |
@@ -172,14 +169,14 @@ NtWriteVirtualMemory:
     ret                     ; Return to caller
 ```
 
-EDRs hook these stubs by replacing the first bytes with a `jmp`. Bypass techniques resolve the syscall number (SSN) dynamically and invoke `syscall` directly — skipping the hooked stub entirely.
+EDRs hook these stubs by replacing the first bytes with a `jmp`. Bypass techniques resolve the syscall number (SSN) dynamically and invoke `syscall` directly, skipping the hooked stub entirely.
 
 **Resolution techniques:**
 
-- **Hell's Gate** — Reads SSNs from neighboring unhooked stubs
-- **Halos Gate** — Extends Hell's Gate with fallback resolution
-- **Tartarus Gate** — Handles multiple consecutive hooked functions
-- **SysWhispers** — Compile-time SSN resolution from version tables
+- **Hell's Gate** reads SSNs from neighboring unhooked stubs
+- **Halos Gate** extends Hell's Gate with fallback resolution
+- **Tartarus Gate** handles multiple consecutive hooked functions
+- **SysWhispers** provides compile-time SSN resolution from version tables
 
 * * *
 
@@ -232,21 +229,21 @@ Even well-implemented EDRs have structural limitations:
 
 ### 1. User-Mode Hooks Are Bypassable
 
-Hooks in `ntdll.dll` exist in the process's own address space — an attacker with code execution can:
+Hooks in `ntdll.dll` exist in the process's own address space. An attacker with code execution can:
 - Unhook by restoring original bytes from a clean ntdll copy
 - Use direct/indirect syscalls to bypass hooks entirely
 - Load a second ntdll from disk (`KnownDlls` or manual mapping)
 
 ### 2. Timing Windows
 
-Kernel callbacks are not instantaneous — brief windows exist:
+Kernel callbacks are not instantaneous and brief windows exist:
 - Between process creation and hook initialization
 - Between thread creation and callback registration
 - Poll-based agents have gaps between scans
 
 ### 3. Kernel Trust Boundary
 
-If an attacker gains kernel access (e.g., via BYOVD — Bring Your Own Vulnerable Driver):
+If an attacker gains kernel access (e.g., via BYOVD, Bring Your Own Vulnerable Driver):
 - Callbacks can be unregistered
 - Minifilters can be detached
 - ETW providers can be disabled
@@ -254,10 +251,10 @@ If an attacker gains kernel access (e.g., via BYOVD — Bring Your Own Vulnerabl
 
 ### 4. Blind Spots
 
-- **Pre-existing processes** — Processes running before the EDR starts are not re-scanned
-- **32-bit processes on 64-bit** — WoW64 layer complicates monitoring
-- **Encrypted/packed content** — Cannot analyze what it cannot read
-- **Fileless attacks** — In-memory-only execution avoids filesystem minifilters
+- **Pre-existing processes** that were running before the EDR starts are not re-scanned
+- **32-bit processes on 64-bit** systems are harder to monitor due to the WoW64 layer
+- **Encrypted/packed content** cannot be analyzed because the EDR cannot read it
+- **Fileless attacks** executing only in memory avoid filesystem minifilters
 
 ### 5. Cloud Dependency
 
@@ -308,18 +305,18 @@ These are the primary categories of techniques used to evade EDR detection:
 
 - Periodically verifies integrity of SSDT, IDT, GDT, and kernel code
 - Triggers `CRITICAL_STRUCTURE_CORRUPTION` (bug check 0x109) on tampering
-- Protects against SSDT hooking — forcing EDRs to use supported callback APIs
+- Protects against SSDT hooking, which forces EDRs to use supported callback APIs instead
 - Does NOT protect dynamically registered callbacks (EDR's own callback pointers)
 
-This is why modern EDRs use `PsSetCreateProcessNotifyRoutineEx` instead of SSDT hooks — PatchGuard allows it.
+This is why modern EDRs use `PsSetCreateProcessNotifyRoutineEx` instead of SSDT hooks. PatchGuard allows the callback-based approach.
 
 * * *
 
 ## Further Reading
 
-- [Understanding and Attacking EDRs](https://benjitrapp.github.io/attacks/2024-08-21-edr-and-malware/) — Deep dive into EDR internals and attack surfaces
-- [EDR Hook Detection](https://benjitrapp.github.io/attacks/2026-06-19-edr-hook-detection/) — Automated hook identification
-- [Offensive ETW](https://benjitrapp.github.io/attacks/2024-02-11-offensive-etw/) — Attacking Event Tracing for Windows
-- [EDR Bypass Roadmap](https://benjitrapp.github.io/attacks/2026-01-18-EDR-bypass-roadmap/) — Strategic approach to bypassing EDR
-- [ETW Threat Intelligence](https://benjitrapp.github.io/defenses/2026-06-19-etw-ti/) — Kernel-level telemetry defense
-- [MostShittyEDR Challenges](/MostShittyEDR/challenges/) — Practice bypassing a deliberately weak EDR
+- [Understanding and Attacking EDRs](https://benjitrapp.github.io/attacks/2024-08-21-edr-and-malware/) for a deep dive into EDR internals and attack surfaces
+- [EDR Hook Detection](https://benjitrapp.github.io/attacks/2026-06-19-edr-hook-detection/) for automated hook identification
+- [Offensive ETW](https://benjitrapp.github.io/attacks/2024-02-11-offensive-etw/) on attacking Event Tracing for Windows
+- [EDR Bypass Roadmap](https://benjitrapp.github.io/attacks/2026-01-18-EDR-bypass-roadmap/) for a strategic approach to bypassing EDR
+- [ETW Threat Intelligence](https://benjitrapp.github.io/defenses/2026-06-19-etw-ti/) on kernel-level telemetry defense
+- [MostShittyEDR Challenges](/MostShittyEDR/challenges/) to practice bypassing a deliberately weak EDR
