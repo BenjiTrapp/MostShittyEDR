@@ -1,0 +1,20 @@
+---
+layout: default
+---
+<article class="challenge">
+  <div class="challenge-header">
+    <h1>{{ page.title }}</h1>
+    <div class="challenge-meta">
+      <span class="badge badge-{{ page.difficulty }}">{{ page.difficulty | capitalize }}</span>
+      <span class="badge badge-category">{{ page.category }}</span>
+      <span class="badge badge-rule">Target: Rule {{ page.target_rule }}</span>
+    </div>
+  </div>
+
+  {{ content }}
+
+  <div class="challenge-footer">
+    <a href="{{ '/solutions/' | relative_url }}{{ page.slug | default: page.name | remove: '.md' }}/" class="btn btn-solution">View Solution</a>
+    <a href="{{ '/challenges/' | relative_url }}" class="btn btn-back">All Challenges</a>
+  </div>
+</article>

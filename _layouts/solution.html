@@ -1,0 +1,19 @@
+---
+layout: default
+---
+<article class="solution">
+  <div class="solution-header">
+    <h1>{{ page.title }}</h1>
+    <div class="solution-meta">
+      <span class="badge badge-{{ page.difficulty }}">{{ page.difficulty | capitalize }}</span>
+      <span class="badge badge-category">{{ page.category }}</span>
+    </div>
+  </div>
+
+  {{ content }}
+
+  <div class="solution-footer">
+    <a href="{{ '/challenges/' | relative_url }}{{ page.slug | default: page.name | remove: '.md' }}/" class="btn btn-challenge">Back to Challenge</a>
+    <a href="{{ '/challenges/' | relative_url }}" class="btn btn-back">All Challenges</a>
+  </div>
+</article>

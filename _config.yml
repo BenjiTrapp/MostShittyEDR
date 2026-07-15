@@ -1,0 +1,24 @@
+title: "MostShittyEDR - EDR Bypass Lab"
+description: "The World's Most Intentionally Terrible EDR - A hands-on bypass lab"
+baseurl: "/MostShittyEDR"
+url: "https://benjitrapp.github.io"
+theme: null
+plugins: []
+
+collections:
+  challenges:
+    output: true
+    permalink: /challenges/:name/
+  solutions:
+    output: true
+    permalink: /solutions/:name/
+
+defaults:
+  - scope:
+      path: "challenges"
+    values:
+      layout: "challenge"
+  - scope:
+      path: "solutions"
+    values:
+      layout: "solution"
