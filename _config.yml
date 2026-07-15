@@ -15,10 +15,12 @@ collections:
 
 defaults:
   - scope:
-      path: "challenges"
+      path: ""
+      type: "challenges"
     values:
       layout: "challenge"
   - scope:
-      path: "solutions"
+      path: ""
+      type: "solutions"
     values:
       layout: "solution"
