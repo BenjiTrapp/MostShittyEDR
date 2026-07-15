@@ -1,22 +1,11 @@
-<p align="center">
-  <img src="static/logo.png" alt="MostShittyEDR Logo" width="400">
-</p>
-
-# MostShittyEDR - EDR Bypass Lab
-
-```
-  __  __         _   ___ _    _ _   _          ___ ___  ___
- |  \/  |___ ___| |_/ __| |_ (_) |_| |_ _  _ | __|   \| _ \
- | |\/| / _ (_-<  _\__ \ ' \| |  _|  _| || | | _|| |) |   /
- |_|  |_\___/__/\__|___/_||_|_|\__|\__|\_, | |___|___/|_|_\
-                                        |__/
-```
-
 [![Nim](https://img.shields.io/badge/Nim-2.0+-FFE953?logo=nim&logoColor=white)](https://nim-lang.org)
 [![Windows](https://img.shields.io/badge/Windows-Only-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Educational](https://img.shields.io/badge/Purpose-Educational%20Only-red)](docs/EDR_BYPASS_TECHNIQUES.md)
 
+<p align="center">
+  <img src="static/logo.png" alt="MostShittyEDR Logo" width="400">
+</p>
 **The World's Most Intentionally Terrible Endpoint Detection & Response Agent**
 
 > *"If you can't bypass this, you definitely need more practice"*
