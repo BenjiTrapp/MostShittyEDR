@@ -1,39 +1,93 @@
-[![Nim](https://img.shields.io/badge/Nim-2.0+-FFE953?logo=nim&logoColor=white)](https://nim-lang.org)
-[![Windows](https://img.shields.io/badge/Windows-Only-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Educational](https://img.shields.io/badge/Purpose-Educational%20Only-red)](docs/EDR_BYPASS_TECHNIQUES.md)
+<div align="center">
 
-<p align="center">
-  <img src="static/logo.png" alt="MostShittyEDR Logo" width="400">
-</p>
-**The World's Most Intentionally Terrible Endpoint Detection & Response Agent**
+<img src="static/logo.png" alt="MostShittyEDR Logo" width="500" />
+
+</div>
+<br><br>
+
+# MostShittyEDR
+
+### *The World's Most Intentionally Terrible Endpoint Detection & Response Agent*
+
+[![Nim](https://img.shields.io/badge/Nim-2.0+-yellow.svg?style=flat-square&logo=nim)](https://nim-lang.org/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg?style=flat-square&logo=windows)](https://www.microsoft.com/windows)
+[![Status](https://img.shields.io/badge/status-Educational%20Only-red.svg?style=flat-square)](README.md)
+
+**An educational EDR agent built in Nim to demonstrate process monitoring, detection techniques, and their bypasses.**
+
+[Features](#-features) • [Quick Start](#quick-start) • [Challenges](#-the-challenge) • [Architecture](#-architecture) • [Detection Methods](#-detection-methods-explained) • [EDR Explained](https://benjitrapp.github.io/MostShittyEDR/edr-explained/) • [Resources](#-resources)
+
+</div>
+
+---
+
+## Overview
+
+**MostShittyEDR** is a deliberately weak EDR agent designed for **security research**, **education**, and **red team training**. It implements basic detection methods that mirror real-world EDR engines but with intentional weaknesses mapped to specific bypass challenges.
 
 > *"If you can't bypass this, you definitely need more practice"*
 
-A deliberately weak EDR agent written in Nim, designed as a hands-on lab for learning EDR evasion techniques. Each detection rule contains intentional weaknesses that map to specific bypass challenges.
+> :warning: **Disclaimer**: This is NOT production security software. It's an educational tool for understanding EDR evasion techniques.
 
 ---
 
 ## Features
 
-| Feature | Implementation | Intentional Weakness |
-|---------|---------------|---------------------|
-| Process Name Blacklist | Case-sensitive exact match | Renaming or case change bypasses |
-| Command Line Keywords | Simple substring search | No deobfuscation, env vars bypass |
-| Recon Detection | Detects recon commands | Result is `discard`ed - never blocks |
-| LSASS Dump Detection | Tool name + keyword match | Requires both conditions - rename breaks it |
-| PowerShell Analysis | Flag pattern matching | Only checks `powershell.exe`, not `pwsh.exe` |
-| Hash-Based Detection | "Enterprise-grade" hash DB | Database is empty - pure security theater |
-| Process Monitoring | Polling via Toolhelp32 | Timing gaps between polls |
-| Command Line Reading | PEB reading (64-bit only) | Fails for elevated/protected/32-bit processes |
+<table>
+<tr>
+<td width="50%">
+
+### Detection Engines
+
+- **Process Name Blacklist**
+  - Case-sensitive exact match
+  - 12 hardcoded tool names
+  - No path or hash validation
+
+- **Command Line Analysis**
+  - Keyword substring search
+  - No deobfuscation support
+  - ASCII-only toLower
+
+- **LSASS Dump Detection**
+  - Tool name + keyword dual match
+  - Easily broken by renaming
+
+</td>
+<td width="50%">
+
+### Technical Features
+
+- **Process Monitoring**
+  - Toolhelp32 snapshot polling
+  - PEB reading for command lines
+  - 64-bit process support
+
+- **Response Actions**
+  - Process termination (configurable)
+  - Detection-only mode (--no-kill)
+  - Adjustable poll interval
+
+- **Detailed Logging**
+  - Timestamped output
+  - Color-coded severity levels
+  - Step-by-step detection trace
+
+</td>
+</tr>
+</table>
+
+---
 
 ## Quick Start
 
 ### Prerequisites
 
-- [Nim 2.0+](https://nim-lang.org/install.html)
-- Windows 10/11 (64-bit)
-- [winim](https://github.com/nickelc/winim) package (installed automatically)
+```bash
+# Windows with Nim 2.0+
+winget install nim-lang.Nim
+```
 
 ### Build & Run
 
@@ -45,7 +99,7 @@ make build
 nimble install winim -y
 nim c -d:release --opt:size -o:edr_agent.exe src/edr_agent.nim
 
-# Run the EDR agent
+# Run the EDR agent (verbose mode)
 .\edr_agent.exe --verbose
 
 # Run in detection-only mode (no process termination)
@@ -57,23 +111,41 @@ nim c -d:release --opt:size -o:edr_agent.exe src/edr_agent.nim
 
 ### Lab Usage
 
-1. **Terminal 1**: Start the EDR agent
-   ```powershell
-   .\edr_agent.exe --verbose --no-kill
-   ```
+```powershell
+# Terminal 1: Start the EDR agent
+.\edr_agent.exe --verbose --no-kill
 
-2. **Terminal 2**: Try to execute commands without being detected
-   ```powershell
-   # This will be detected:
-   whoami
-
-   # Can you find a way that won't be detected?
-   # See challenges/ for hints!
-   ```
-
-## Console Output
-
+# Terminal 2: Try to execute commands without being detected
+whoami          # This WILL be detected
+# Can you find a way that won't be?
 ```
+
+---
+
+## The Challenge
+
+> **Can you bypass the EDR?**
+> This agent uses common detection patterns found in real-world EDR products.
+> Your mission: Execute tools and commands without being detected or killed!
+
+### Known Vulnerabilities
+
+- :unlock: Case-sensitive blacklist (`Mimikatz.exe` != `mimikatz.exe`)
+- :unlock: No command-line deobfuscation (carets, env vars, encoding all bypass)
+- :unlock: Recon detection is theater (Rule 3 detects but discards the result)
+- :unlock: LSASS rule needs dual match (rename tool OR omit "lsass" keyword)
+- :unlock: Only monitors `powershell.exe` (not `pwsh.exe`)
+- :unlock: Empty hash database (Rule 6 has zero entries)
+- :unlock: Polling-based monitoring (timing gaps between scans)
+- :unlock: No pre-existing process analysis (start before EDR = invisible)
+
+**20 challenges across 5 categories, from Easy to Hard!**
+
+---
+
+## Example Output
+
+```console
   __  __         _   ___ _    _ _   _          ___ ___  ___
  |  \/  |___ ___| |_/ __| |_ (_) |_| |_ _  _ | __|   \| _ \
  | |\/| / _ (_-<  _\__ \ ' \| |  _|  _| || | | _|| |) |   /
@@ -102,143 +174,182 @@ nim c -d:release --opt:size -o:edr_agent.exe src/edr_agent.nim
 [14:23:12.105] [OK]       chrome.exe (PID: 9104)
 ```
 
-## Challenges
-
-20 bypass challenges across 5 categories, from Easy to Hard:
-
-### Category 1: Process Name Evasion (Easy)
-
-| # | Challenge | Difficulty | Target Rule |
-|---|-----------|-----------|-------------|
-| 1 | Binary Rename | Easy | Rule 1 |
-| 2 | Case Sensitivity Exploit | Easy | Rule 1 |
-| 3 | Copy and Rename | Easy | Rule 1 |
-| 4 | Unlisted Tool | Easy | Rule 1 |
-
-### Category 2: Command Line Obfuscation (Easy-Medium)
-
-| # | Challenge | Difficulty | Target Rule |
-|---|-----------|-----------|-------------|
-| 5 | Path Manipulation | Easy | Rule 1 |
-| 6 | Caret Insertion | Easy | Rule 2 |
-| 7 | Environment Variable Substitution | Medium | Rule 2 |
-| 8 | Base64 Encoded Commands | Medium | Rule 2, 5 |
-| 9 | The Useless Rule | Easy | Rule 3 |
-
-### Category 3: Process Monitoring Bypass (Medium)
-
-| # | Challenge | Difficulty | Target Rule |
-|---|-----------|-----------|-------------|
-| 10 | Timing Attack | Medium | Architecture |
-| 11 | Pre-Existing Process | Easy | Architecture |
-| 12 | Living Off The Land | Medium | Rule 2, 3 |
-| 13 | LSASS Without Keywords | Medium | Rule 4 |
-| 14 | Tool Rename for LSASS | Medium | Rule 4 |
-
-### Category 4: Execution Evasion (Medium-Hard)
-
-| # | Challenge | Difficulty | Target Rule |
-|---|-----------|-----------|-------------|
-| 15 | Alternative PowerShell Host | Medium | Rule 5 |
-| 16 | Elevated Process Evasion | Medium | Architecture |
-| 17 | 32-Bit Process Evasion | Medium | Architecture |
-| 18 | Unicode Process Names | Hard | Architecture |
-
-### Category 5: Advanced Bypass (Hard)
-
-| # | Challenge | Difficulty | Target Rule |
-|---|-----------|-----------|-------------|
-| 19 | Parent PID Spoofing | Hard | Architecture |
-| 20 | The Empty Hash Database | Easy | Rule 6 |
-
-> See [`challenges/`](challenges/) for full challenge descriptions with hints, and [`solutions/`](solutions/) for detailed walkthroughs.
+---
 
 ## Architecture
-
-```
-MostShittyEDR/
-├── src/
-│   ├── edr_agent.nim          # User-mode EDR agent (Nim)
-│   └── driver/
-│       └── driver.cpp         # Kernel driver (C++, reference only)
-├── challenges/                # 20 bypass challenges
-├── solutions/                 # Detailed solution walkthroughs
-├── docs/                      # Technical documentation
-├── _config.yml                # GitHub Pages config
-├── _layouts/                  # Jekyll layouts
-├── assets/css/                # Site styles
-├── Makefile                   # Build automation
-└── MostShittyEDR.nimble       # Nim package config
-```
 
 ### Detection Pipeline
 
 ```
 New Process Detected (via Toolhelp32 polling)
-    │
-    ├─→ Rule 1: Process Name Blacklist  ──→ KILL (case-sensitive!)
-    ├─→ Rule 2: Command Line Keywords   ──→ KILL (no deobfuscation!)
-    ├─→ Rule 3: Recon Detection         ──→ discard (never blocks!)
-    ├─→ Rule 4: LSASS Dump Detection    ──→ KILL (needs both conditions!)
-    ├─→ Rule 5: PowerShell Analysis     ──→ ALERT (only powershell.exe!)
-    └─→ Rule 6: Hash Check              ──→ discard (empty database!)
+    |
+    +-> Rule 1: Process Name Blacklist  --> KILL (case-sensitive!)
+    +-> Rule 2: Command Line Keywords   --> KILL (no deobfuscation!)
+    +-> Rule 3: Recon Detection         --> discard (never blocks!)
+    +-> Rule 4: LSASS Dump Detection    --> KILL (needs both conditions!)
+    +-> Rule 5: PowerShell Analysis     --> ALERT (only powershell.exe!)
+    +-> Rule 6: Hash Check              --> discard (empty database!)
 ```
 
-### Known Design Weaknesses (by Design)
+### Project Structure
 
-1. **Polling-based monitoring** - Processes can execute between poll intervals
-2. **Case-sensitive blacklist** - `Mimikatz.exe` != `mimikatz.exe`
-3. **No command-line deobfuscation** - Carets, env vars, encoding all bypass
-4. **Recon detection is theater** - Rule 3 detects but discards the result
-5. **LSASS rule needs dual match** - Rename tool OR omit "lsass" keyword
-6. **Only monitors powershell.exe** - `pwsh.exe`, `cmd.exe /c powershell` bypass
-7. **Empty hash database** - Rule 6 has zero entries
-8. **ASCII-only string handling** - Unicode characters become `?`
-9. **64-bit PEB offsets only** - 32-bit processes have unreadable command lines
-10. **No pre-existing process analysis** - Start before the EDR = invisible
-11. **No DLL/module monitoring** - DLL injection is invisible
-12. **No ETW integration** - No kernel-level telemetry
+```
+MostShittyEDR/
+├── src/
+│   ├── edr_agent.nim              # User-mode EDR agent (Nim)
+│   └── driver/
+│       └── driver.cpp             # Kernel driver (C++, reference only)
+├── _challenges/                   # 20 bypass challenges
+├── _solutions/                    # Detailed solution walkthroughs
+├── docs/                          # Technical documentation
+├── static/                        # Logo and assets
+├── _config.yml                    # GitHub Pages config
+├── _layouts/                      # Jekyll layouts
+├── assets/css/                    # Site styles
+├── Makefile                       # Build automation
+└── MostShittyEDR.nimble           # Nim package config
+```
+
+---
+
+## Detection Methods Explained
+
+### 1. Process Name Blacklist
+```nim
+const blacklist = [
+  "mimikatz.exe", "rubeus.exe", "sharphound.exe",
+  "procdump.exe", "psexec.exe", "cobaltstrike.exe", ...
+]
+```
+Case-sensitive exact match against a static list. Rename = bypass.
+
+### 2. Command Line Keywords
+```nim
+const keywords = [
+  "sekurlsa", "kerberos::list", "invoke-mimikatz",
+  "dump", "hashdump", "lsass", ...
+]
+```
+Substring search with no deobfuscation. Carets, env vars, and encoding all bypass.
+
+### 3. Recon Detection (Security Theater)
+```nim
+const reconCmds = ["whoami", "ipconfig", "netstat", "systeminfo", ...]
+# Result is `discard`ed - detects but NEVER blocks
+```
+The detection fires but the result is thrown away. Pure theater.
+
+### 4. LSASS Dump Detection
+```nim
+# Requires BOTH conditions:
+# 1. Tool name matches (procdump, comsvcs, etc.)
+# 2. Command line contains "lsass"
+```
+Rename the tool OR omit the keyword and the rule fails.
+
+### 5. PowerShell Flag Analysis
+```nim
+# Only checks processes named "powershell.exe"
+# pwsh.exe, cmd.exe /c powershell, and PowerShell ISE are invisible
+```
+
+### 6. Hash-Based Detection
+```nim
+const hashDB: seq[string] = @[]  # Empty!
+```
+Zero entries. Enterprise-grade security theater.
+
+---
+
+## Challenge Categories
+
+| Category | Challenges | Difficulty | Target |
+|----------|-----------|-----------|--------|
+| **Process Name Evasion** | 01-04 | Easy | Rule 1 |
+| **Command Line Obfuscation** | 05-09 | Easy-Medium | Rules 2, 3, 5 |
+| **Process Monitoring Bypass** | 10-14 | Medium | Architecture, Rule 4 |
+| **Execution Evasion** | 15-18 | Medium-Hard | Architecture, Rule 5 |
+| **Advanced Bypass** | 19-20 | Easy-Hard | Architecture, Rule 6 |
+
+See the [Challenge Browser](https://benjitrapp.github.io/MostShittyEDR/challenges/) for full descriptions with hints, and the [Solutions](https://benjitrapp.github.io/MostShittyEDR/solutions/) for detailed walkthroughs.
+
+---
 
 ## Kernel Driver (Advanced Reference)
 
-The `src/driver/driver.cpp` contains a Windows kernel driver that provides:
+The `src/driver/driver.cpp` contains a Windows kernel driver providing:
+
 - Process creation/exit callbacks via `PsSetCreateProcessNotifyRoutineEx`
 - Thread creation/exit callbacks via `PsSetCreateThreadNotifyRoutine`
 - LSASS handle protection via `ObRegisterCallbacks`
 - Kernel-level process blocking rules
 - IOCTL communication with user-mode agents
 
-> The kernel driver requires the Windows Driver Kit (WDK) and test-signing mode.
-> It is included as educational reference material - the Nim agent works standalone.
+> The kernel driver requires the Windows Driver Kit (WDK) and test-signing mode. It is included as educational reference material.
+
+---
 
 ## Educational Value
 
-This project teaches:
+This project demonstrates:
 
-- [x] How EDR agents monitor processes
-- [x] Common detection rule patterns and their weaknesses
-- [x] Process enumeration via Windows API
-- [x] PEB reading for command line extraction
-- [x] Why case-sensitive matching is a vulnerability
-- [x] How `discard` patterns create detection gaps
-- [x] Timing-based evasion of polling monitors
-- [x] The gap between "detection" and "prevention"
-- [x] Why hash-based detection alone is insufficient
-- [x] Kernel vs. user-mode monitoring tradeoffs
+- :white_check_mark: **EDR Architecture** - Agent pattern, polling, detection pipelines
+- :white_check_mark: **Process Monitoring** - Toolhelp32 snapshots, PEB reading
+- :white_check_mark: **Detection Rules** - Blacklists, keywords, heuristics, hashes
+- :white_check_mark: **Rule Weaknesses** - Case sensitivity, missing deobfuscation, timing gaps
+- :white_check_mark: **Evasion Techniques** - Renaming, encoding, timing, privilege escalation
+- :white_check_mark: **Kernel vs User-Mode** - Why user-mode polling is fundamentally limited
+- :white_check_mark: **Nim Programming** - Windows API, process manipulation, systems programming
 
-## Legal Disclaimer
+---
 
-This software is provided for **educational and authorized security testing purposes only**.
+## Resources
 
-- Use only in controlled lab environments or with explicit written authorization
-- Never deploy against systems you do not own or have permission to test
-- The authors are not responsible for misuse of this software
-- This tool is intentionally weak and should never be used as actual endpoint protection
+### EDR Internals
+- [EDR Explained (MostShittyEDR)](https://benjitrapp.github.io/MostShittyEDR/edr-explained/) - How real EDRs work
+- [Understanding and Attacking EDRs](https://benjitrapp.github.io/attacks/2024-08-21-edr-and-malware/) - Deep dive into hooking, syscalls, and kernel bypass
+- [EDR Bypass Roadmap](https://benjitrapp.github.io/attacks/2026-01-18-EDR-bypass-roadmap/) - Strategic approach to bypassing EDR
+
+### Companion Projects
+- [MostShittyAV](https://github.com/BenjiTrapp/MostShittyAV) - The AMSI bypass companion lab
+
+### Nim Language
+- [Nim Official Website](https://nim-lang.org/)
+- [Nim Documentation](https://nim-lang.org/documentation.html)
+- [winim Package](https://github.com/nickelc/winim) - Windows API bindings for Nim
+
+### Security Research
+- [MITRE ATT&CK - Defense Evasion](https://attack.mitre.org/tactics/TA0005/)
+- [LOLBAS Project](https://lolbas-project.github.io/) - Living Off The Land Binaries
+
+---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Related Projects
+---
 
-- [MostShittyAV](https://github.com/BenjiTrapp/MostShittyAV) - The companion AMSI bypass lab
+## :warning: Legal Notice
+
+**This tool is for educational and research purposes only.**
+
+- :x: Do not use on systems you don't own or have explicit permission to test
+- :x: Do not use for malicious purposes
+- :x: Not a replacement for real endpoint security
+- :white_check_mark: Use in controlled lab environments only
+- :white_check_mark: Understand applicable laws and regulations in your jurisdiction
+
+**The author assumes no liability for misuse of this software.**
+
+---
+
+<div align="center">
+
+### Happy Hunting!
+
+*Made with Nim for the security research community*
+
+**[:star: Star this repo](../../stargazers)** • **[:bug: Report Bug](../../issues)** • **[:bulb: Request Feature](../../issues)**
+
+</div>
