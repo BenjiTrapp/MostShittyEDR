@@ -36,7 +36,7 @@ A typical enterprise EDR consists of four core components working together:
 
 ### High-Level Architecture
 
-```mermaid
+<pre class="mermaid">
 graph TB
     subgraph Cloud["EDR Backend / Cloud"]
         CE[Correlation Engine]
@@ -59,7 +59,7 @@ graph TB
     Kernel -->|Raw Events| Agent
     Agent -->|Telemetry Upload| Cloud
     Cloud -->|Policy Updates| Agent
-```
+</pre>
 
 * * *
 
@@ -128,7 +128,7 @@ EDRs inject DLLs into every process and hook critical Windows API functions in `
 
 ### How Hooking Works
 
-```mermaid
+<pre class="mermaid">
 graph LR
     subgraph Normal["Normal Execution"]
         A1[Application] --> N1[NtWriteVirtualMemory]
@@ -143,7 +143,7 @@ graph LR
         EDR --> O["Execute original<br/>syscall stub"]
         O --> K2[Kernel]
     end
-```
+</pre>
 
 ### Hooking Methods
 
