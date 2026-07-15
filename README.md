@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="static/logo.png" alt="MostShittyEDR Logo" width="400">
+</p>
+
 # MostShittyEDR - EDR Bypass Lab
 
 ```
