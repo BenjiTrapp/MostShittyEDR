@@ -7,44 +7,39 @@ target_rule: 6
 
 ## Objective
 
-Discover that Rule 6 (hash-based detection) is pure security theater with an empty database.
+Discover that Rule 6 (hash-based detection) is disabled by default — without the `--signatures` flag, it has no hashes to compare against.
 
 ## Scanner Behavior
 
-Rule 6 claims to check malware hashes but the database is literally empty:
+Without `--signatures`, the signature database is empty:
 
 ```nim
-let KnownMalwareHashes: seq[string] = @[]
+var gSignatureHashes: seq[string] = @[]
 
 proc ruleHashCheck(info: ProcessInfo): seq[Detection] =
-  result = @[]
-  for h in KnownMalwareHashes:  # iterates over... nothing
-    discard h
-  # Always returns empty
+  if gSignatureHashes.len == 0:
+    return  # exits immediately — checks nothing
 ```
 
-Furthermore, even if the database had entries, the result is **discarded** in the analysis engine:
-
-```nim
-discard ruleHashCheck(enriched)  # result thrown away
-```
+The banner displays this openly: `[6] Hash-Based Detection (0 hashes) [EMPTY - use --signatures]`
 
 ## Rules
 
-- Run any known malware sample or suspicious binary
+- Start the EDR **without** the `--signatures` flag
+- Run any binary (malicious or not)
 - Confirm that Rule 6 never triggers
-- Explain the two separate reasons why this rule is useless
+- Explain why the rule is useless without signatures loaded
 
 ## Hints
 
 <details class="hint-box"><summary>Hint 1</summary>
-Look at the <code>KnownMalwareHashes</code> constant. How many entries does it have?
+Look at the banner output — it tells you exactly how many signatures are loaded.
 </details>
 
 <details class="hint-box"><summary>Hint 2</summary>
-Even if you added hashes to the database, look at how <code>ruleHashCheck</code> is called in <code>analyzeProcess</code>.
+Without <code>--signatures</code>, <code>gSignatureHashes</code> is an empty sequence. The <code>ruleHashCheck</code> function returns immediately.
 </details>
 
 <details class="hint-box"><summary>Hint 3</summary>
-Two bugs: (1) The hash database is empty - zero hashes to compare against. (2) The result of <code>ruleHashCheck</code> is <code>discard</code>ed - even if it found something, the detection would be thrown away. This is double security theater.
+Even with <code>--signatures</code> loaded, there are still bypass techniques (Challenges 29-32). But without it, Rule 6 is pure security theater — it appears in the feature list but does absolutely nothing.
 </details>

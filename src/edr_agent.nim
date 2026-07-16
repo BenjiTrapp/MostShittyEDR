@@ -9,7 +9,7 @@
 ## maps to a bypass challenge.
 
 import winim/lean
-import winim/inc/tlhelp32
+import winim/inc/[tlhelp32, wincrypt]
 import std/[os, strutils, times, sets, parseopt, tables]
 
 # ============================================================
@@ -63,6 +63,7 @@ type
     noEtw: bool
     pollInterval: int
     profile: HookProfile
+    sigFile: string
 
 # ============================================================
 # Globals
@@ -877,21 +878,107 @@ proc rulePowerShell(info: ProcessInfo): seq[Detection] =
       return
 
 # ============================================================
-# DETECTION RULE 6: Hash-Based Detection (Security Theater)
+# DETECTION RULE 6: Hash-Based Signature Detection
 #
-# WEAKNESS: The hash database is EMPTY. This rule exists only
-#           to look impressive in the feature list. It will
-#           never detect anything. (Challenge 20)
+# Uses SHA256 of the process image file. Signatures are loaded
+# from a plaintext file via --signatures flag.
+#
+# WITHOUT --signatures: database is empty -> pure security
+#   theater, detects nothing at all. (Challenge 20)
+#
+# WITH --signatures: functional but intentionally weak:
+#   WEAKNESS: Only exact SHA256 match — single byte change
+#             in the binary defeats it (Challenge 29)
+#   WEAKNESS: Plaintext signature file — attacker can read
+#             which hashes are known (Challenge 30)
+#   WEAKNESS: Only checks on-disk image — process hollowing
+#             or in-memory modification invisible (Challenge 31)
+#   WEAKNESS: No fuzzy/import/section hashing — repacking or
+#             recompiling same source evades (Challenge 32)
 # ============================================================
 
-let KnownMalwareHashes: seq[string] = @[]
+const
+  PROV_RSA_AES = DWORD(24)
+  CALG_SHA_256 = DWORD(0x0000800C)
+  HP_HASHVAL = DWORD(0x0002)
+
+let CRYPT_VERIFYCONTEXT = cast[DWORD](0xF0000000'u32)
+
+var gSignatureHashes: seq[string] = @[]
+
+proc loadSignatures(path: string): int =
+  gSignatureHashes = @[]
+  if path.len == 0 or not fileExists(path):
+    return 0
+  for line in lines(path):
+    let stripped = line.strip()
+    if stripped.len == 0 or stripped.startsWith("#"):
+      continue
+    let hash = if ' ' in stripped: stripped.split(' ')[0].strip()
+               else: stripped
+    if hash.len == 64:
+      gSignatureHashes.add(hash.toLowerAscii())
+  return gSignatureHashes.len
+
+proc sha256File(path: string): string =
+  result = ""
+  if path.len == 0 or not fileExists(path):
+    return
+
+  var hProv: HCRYPTPROV = 0
+  if CryptAcquireContextA(addr hProv, nil, nil, PROV_RSA_AES,
+      CRYPT_VERIFYCONTEXT) == 0:
+    return
+
+  var hHash: HCRYPTHASH = 0
+  if CryptCreateHash(hProv, ALG_ID(CALG_SHA_256), HCRYPTKEY(0), 0,
+      addr hHash) == 0:
+    discard CryptReleaseContext(hProv, 0)
+    return
+
+  var f: File
+  if not open(f, path, fmRead):
+    discard CryptDestroyHash(hHash)
+    discard CryptReleaseContext(hProv, 0)
+    return
+  defer:
+    close(f)
+    discard CryptDestroyHash(hHash)
+    discard CryptReleaseContext(hProv, 0)
+
+  var buf: array[8192, byte]
+  while true:
+    let bytesRead = readBytes(f, buf, 0, buf.len)
+    if bytesRead == 0: break
+    if CryptHashData(hHash, cast[ptr BYTE](addr buf[0]),
+        DWORD(bytesRead), 0) == 0:
+      return
+
+  var hashSize: DWORD = 32
+  var hashBytes: array[32, BYTE]
+  if CryptGetHashParam(hHash, HP_HASHVAL, addr hashBytes[0],
+      addr hashSize, 0) == 0:
+    return
+
+  for b in hashBytes:
+    result.add(b.toHex(2).toLowerAscii())
 
 proc ruleHashCheck(info: ProcessInfo): seq[Detection] =
   result = @[]
-  # "Checking" known malware hashes...
-  for h in KnownMalwareHashes:
-    discard h
-  # Always returns empty - pure security theater
+  if gSignatureHashes.len == 0:
+    return
+
+  let imgHash = sha256File(info.imagePath)
+  if imgHash.len == 0:
+    return
+
+  if imgHash in gSignatureHashes:
+    result.add Detection(
+      ruleName: "KNOWN_MALWARE_HASH",
+      ruleId: 6,
+      severity: sCritical,
+      description: "Known malware signature: " & imgHash[0..15] & "..."
+    )
 
 # ============================================================
 # DETECTION RULE 7: Hooked API Import Detection
@@ -991,6 +1078,172 @@ proc ruleEtwIntegrity(): seq[Detection] =
     )
 
 # ============================================================
+# DETECTION RULE 9: PE Structure Analysis (Packer/Header)
+#
+# Inspects the PE header of new processes for signs of packing,
+# obfuscation, or header manipulation.
+#
+# Detects:
+#   - Known packer section names (UPX0/UPX1, .aspack, etc.)
+#   - Sections with RWX (read-write-execute) permissions
+#   - Entry point outside the first section
+#   - Sections with raw size 0 but virtual size > 0 (hollow)
+#
+# WEAKNESS: Only checks section NAMES — renaming UPX0/UPX1 to
+#           .text/.rdata bypasses detection (Challenge 33)
+# WEAKNESS: No entropy analysis — a custom packer with normal
+#           section names is invisible (Challenge 34)
+# WEAKNESS: No header integrity check — Astral-PE style header
+#           corruption crashes the parser silently (Challenge 35)
+# WEAKNESS: Static analysis only — runtime unpacking into a
+#           new allocation is never re-scanned (Challenge 36)
+# ============================================================
+
+const
+  PackerSectionNames = [
+    "UPX0", "UPX1", "UPX2", "UPX!",
+    ".aspack", ".adata",
+    ".nsp0", ".nsp1", ".nsp2",
+    ".packed", ".RLPack",
+    "pec1", "pec2", "PELOCKnt",
+    ".petite", ".yP", ".y0da"
+  ]
+
+  IMAGE_SCN_MEM_EXECUTE = 0x20000000'u32
+  IMAGE_SCN_MEM_READ    = 0x40000000'u32
+  IMAGE_SCN_MEM_WRITE   = 0x80000000'u32
+
+type
+  PeAnalysis = object
+    valid: bool
+    sectionNames: seq[string]
+    hasPackerSections: bool
+    packerName: string
+    rwxSections: seq[string]
+    hollowSections: seq[string]
+    entryPointSection: string
+    entryInFirstSection: bool
+
+proc analyzePeStructure(imagePath: string): PeAnalysis =
+  result = PeAnalysis(valid: false, entryInFirstSection: true)
+  if imagePath.len == 0 or not fileExists(imagePath):
+    return
+
+  var f: File
+  if not open(f, imagePath, fmRead):
+    return
+  defer: close(f)
+
+  var dosHeader: array[64, byte]
+  if readBytes(f, dosHeader, 0, 64) != 64: return
+  if dosHeader[0] != 0x4D or dosHeader[1] != 0x5A: return
+
+  let eLfaNew = cast[ptr int32](addr dosHeader[0x3C])[]
+  if eLfaNew <= 0 or eLfaNew > 1024 * 1024: return
+
+  setFilePos(f, eLfaNew)
+  var peData: array[4 + 20 + 240, byte]
+  let peRead = readBytes(f, peData, 0, peData.len)
+  if peRead < 4 + 20 + 16: return
+  if peData[0] != ord('P') or peData[1] != ord('E') or
+     peData[2] != 0 or peData[3] != 0:
+    return
+
+  let magic = cast[ptr uint16](addr peData[24])[]
+  let is64 = magic == 0x020B
+
+  let addressOfEntryPoint = cast[ptr uint32](addr peData[24 + 16])[]
+  let numberOfSections = cast[ptr uint16](addr peData[6])[]
+  let sizeOfOptionalHeader = cast[ptr uint16](addr peData[20])[]
+  let sectionStart = eLfaNew + 4 + 20 + int(sizeOfOptionalHeader)
+
+  result.valid = true
+
+  setFilePos(f, sectionStart)
+  for i in 0 ..< int(numberOfSections):
+    var secData: array[40, byte]
+    if readBytes(f, secData, 0, 40) != 40: break
+
+    var secName = ""
+    for j in 0..7:
+      if secData[j] != 0:
+        secName.add(chr(secData[j]))
+
+    let virtualSize = cast[ptr uint32](addr secData[8])[]
+    let virtualAddress = cast[ptr uint32](addr secData[12])[]
+    let rawSize = cast[ptr uint32](addr secData[16])[]
+    let characteristics = cast[ptr uint32](addr secData[36])[]
+
+    result.sectionNames.add(secName)
+
+    for packer in PackerSectionNames:
+      if secName == packer:
+        result.hasPackerSections = true
+        if secName.startsWith("UPX"):
+          result.packerName = "UPX"
+        elif secName == ".aspack" or secName == ".adata":
+          result.packerName = "ASPack"
+        elif secName.startsWith(".nsp"):
+          result.packerName = "NsPack"
+        elif secName == ".petite":
+          result.packerName = "Petite"
+        else:
+          result.packerName = "Unknown"
+        break
+
+    let rwx = IMAGE_SCN_MEM_READ or IMAGE_SCN_MEM_WRITE or IMAGE_SCN_MEM_EXECUTE
+    if (characteristics and rwx) == rwx:
+      result.rwxSections.add(secName)
+
+    if rawSize == 0 and virtualSize > 0:
+      result.hollowSections.add(secName)
+
+    if i == 0:
+      if addressOfEntryPoint >= virtualAddress and
+         addressOfEntryPoint < virtualAddress + virtualSize:
+        result.entryInFirstSection = true
+        result.entryPointSection = secName
+      else:
+        result.entryInFirstSection = false
+
+    if addressOfEntryPoint >= virtualAddress and
+       addressOfEntryPoint < virtualAddress + virtualSize:
+      result.entryPointSection = secName
+
+proc rulePeStructure(info: ProcessInfo): seq[Detection] =
+  result = @[]
+  let pe = analyzePeStructure(info.imagePath)
+  if not pe.valid:
+    return
+
+  if pe.hasPackerSections:
+    result.add Detection(
+      ruleName: "PACKED_BINARY",
+      ruleId: 9,
+      severity: sAlert,
+      description: "Packed binary detected (" & pe.packerName &
+        "): sections [" & pe.sectionNames.join(", ") & "]"
+    )
+
+  if pe.rwxSections.len > 0:
+    result.add Detection(
+      ruleName: "RWX_SECTION",
+      ruleId: 9,
+      severity: sAlert,
+      description: "PE has RWX sections (packing/injection indicator): " &
+        pe.rwxSections.join(", ")
+    )
+
+  if not pe.entryInFirstSection and pe.entryPointSection.len > 0:
+    result.add Detection(
+      ruleName: "SUSPICIOUS_ENTRY_POINT",
+      ruleId: 9,
+      severity: sWarning,
+      description: "Entry point in section '" & pe.entryPointSection &
+        "' (not first section — possible packing)"
+    )
+
+# ============================================================
 # Analysis Engine
 # ============================================================
 
@@ -1009,11 +1262,13 @@ proc analyzeProcess(info: ProcessInfo, cfg: Config): seq[Detection] =
   result.add ruleLsassDump(enriched)
   result.add rulePowerShell(enriched)
 
-  # WEAKNESS: hash check runs but database is empty
-  discard ruleHashCheck(enriched)
+  result.add ruleHashCheck(enriched)
 
   # Rule 7: Check PE imports against hook profile
   result.add ruleHookedApiImports(enriched, cfg.profile)
+
+  # Rule 9: PE structure analysis (packer/header anomaly detection)
+  result.add rulePeStructure(enriched)
 
 # ============================================================
 # Response Engine
@@ -1089,7 +1344,12 @@ proc displayBanner(cfg: Config) =
   echo "    [3] Recon Command Detection   (", ReconCommands.len, " commands) [WARN ONLY]"
   echo "    [4] LSASS Dump Detection      (", LsassDumpIndicators.len, " indicators)"
   echo "    [5] PowerShell Flag Analysis  (", SuspiciousPSFlags.len, " flags)"
-  echo "    [6] Hash-Based Detection      (", KnownMalwareHashes.len, " hashes) [EMPTY]"
+  if gSignatureHashes.len > 0:
+    setColor(clMagenta)
+    echo "    [6] Hash-Based Detection      (", gSignatureHashes.len, " signatures)"
+  else:
+    setColor(clWhite)
+    echo "    [6] Hash-Based Detection      (0 hashes) [EMPTY - use --signatures]"
 
   if cfg.profile.hookedApis.len > 0:
     setColor(clMagenta)
@@ -1108,6 +1368,9 @@ proc displayBanner(cfg: Config) =
   else:
     setColor(clWhite)
     echo "    [8] ETW Integrity Check       (disabled - --no-etw)"
+
+  setColor(clMagenta)
+  echo "    [9] PE Structure Analysis     (packer + header anomalies)"
 
   echo ""
   setColor(clReset)
@@ -1129,6 +1392,8 @@ proc showHelp() =
   echo "                       Available: crowdstrike, carbonblack, cylance,"
   echo "                                  bitdefender, cortex, checkpoint"
   echo "  --list-profiles      Show available hook profiles"
+  echo "  --signatures FILE    Load malware hash signatures for Rule 6"
+  echo "                       Format: one SHA256 per line (# comments allowed)"
   echo "  --no-etw             Disable ETW telemetry provider and Rule 8"
   echo "  --help, -h           Show this help"
   echo ""
@@ -1149,7 +1414,8 @@ proc parseConfig(): Config =
     noKill: false,
     noEtw: false,
     pollInterval: DefaultPollMs,
-    profile: HookProfile(name: "", hookedApis: @[])
+    profile: HookProfile(name: "", hookedApis: @[]),
+    sigFile: ""
   )
 
   var p = initOptParser()
@@ -1168,6 +1434,8 @@ proc parseConfig(): Config =
           result.pollInterval = 50
       of "profile", "p":
         result.profile = loadHookProfile(p.val)
+      of "signatures", "s":
+        result.sigFile = p.val
       of "list-profiles":
         echo "Available hook profiles:"
         for name in listProfiles():
@@ -1189,6 +1457,14 @@ proc parseConfig(): Config =
 
 proc main() =
   let cfg = parseConfig()
+
+  # Load malware signatures before banner (so count shows up)
+  if cfg.sigFile.len > 0:
+    let count = loadSignatures(cfg.sigFile)
+    if count == 0:
+      setColor(clYellow)
+      echo "[WARN] No valid signatures loaded from: ", cfg.sigFile
+      setColor(clReset)
 
   displayBanner(cfg)
 

@@ -472,6 +472,19 @@ Monitors execution patterns rather than static file properties:
 - Lateral movement indicators (remote service creation, WMI execution)
 - Living-off-the-land abuse (suspicious PowerShell, certutil downloads)
 
+### PE Structure & Packer Analysis
+
+Examines the on-disk PE (Portable Executable) structure for signs of packing, obfuscation, or tampering:
+
+- **Section names** compared against known packer signatures (UPX0/UPX1, .aspack, .petite, etc.)
+- **Section permissions** flagged when a section has RWX (Read/Write/Execute) — legitimate binaries almost never need this
+- **Entry point location** verified to be inside the first code section — packed binaries often jump to a decompression stub in a later section
+- **Section entropy** measured via Shannon entropy — encrypted/compressed payloads produce near-maximum entropy (~7.99 bits/byte) in their sections
+- **Header integrity** validated against the PE specification — tools like [Astral-PE](https://github.com/DosX-dev/Astral-PE) corrupt fields that parsers rely on but the Windows loader ignores
+
+**Strengths:** Catches off-the-shelf packers (UPX, ASPack, Petite) instantly, no signature database needed
+**Weaknesses:** Custom packers with normal section names and standard permissions are invisible; header obfuscation crashes strict parsers silently; no entropy analysis means encrypted `.data` sections go unnoticed
+
 ### Machine Learning
 
 Classifies files and behaviors using trained models:
@@ -527,7 +540,7 @@ If an attacker gains kernel access (e.g., via BYOVD, Bring Your Own Vulnerable D
 
 - **Pre-existing processes** that were running before the EDR starts are not re-scanned
 - **32-bit processes on 64-bit** systems are harder to monitor due to the WoW64 layer
-- **Encrypted/packed content** cannot be analyzed because the EDR cannot read it
+- **Encrypted/packed content** can be flagged by static PE analysis (section names, entropy) but the actual payload cannot be analyzed until runtime unpacking occurs
 - **Fileless attacks** executing only in memory avoid filesystem minifilters
 
 ### 5. Cloud Dependency
@@ -546,11 +559,12 @@ This lab deliberately implements each EDR concept in the weakest possible way:
 |-----------------|------------------------------|---------------|
 | Kernel callbacks | User-mode polling (Toolhelp32) | Timing gaps, no kernel visibility |
 | Behavioral detection | Substring matching on command lines | No deobfuscation, no context |
-| Hash database | Empty hash set | Literally zero entries |
+| Hash database | SHA256 from plaintext file (`--signatures`) | Exact-match only, on-disk only, readable signature file |
 | Process blocking | Case-sensitive name blacklist | Rename = bypass |
 | LSASS protection | Dual-condition keyword match | Either condition alone = bypass |
 | PowerShell analysis | Checks `powershell.exe` only | `pwsh.exe` is invisible |
 | ETW telemetry | User-mode provider + session (Rule 8) | No kernel-mode ETW-TI, patchable `EtwEventWrite`, hardcoded session name |
+| PE structure analysis | Section name matching + RWX check (Rule 9) | No entropy analysis, strict parser crashes on corrupted headers, no runtime re-scan |
 | Response actions | `discard` on recon detection | Detects but never acts |
 
 * * *
@@ -569,6 +583,7 @@ These are the primary categories of techniques used to evade EDR detection:
 | **ETW Blinding** | Patch ETW functions to suppress telemetry | Medium |
 | **Minifilter Detach** | Unload or detach filesystem minifilters | Hard |
 | **Callback Removal** | Enumerate and remove kernel notification callbacks | Hard |
+| **Packer Evasion** | Custom packers with normal section names, or header obfuscation (Astral-PE) | Medium |
 | **Telemetry Blocking** | Block EDR network communication via firewall/WFP | Easy |
 
 * * *

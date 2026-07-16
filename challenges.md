@@ -6,7 +6,7 @@ permalink: /challenges/
 
 # EDR Bypass Challenges
 
-28 challenges across 7 categories. Start with Easy and work your way up.
+36 challenges across 9 categories. Start with Easy and work your way up.
 
 ## Category 1: Process Name Evasion
 
@@ -153,7 +153,7 @@ permalink: /challenges/
 <a href="{{ '/challenges/20-empty-hash-database/' | relative_url }}" class="challenge-card">
 <span class="badge badge-easy">Easy</span>
 <h3>20 - The Empty Hash Database</h3>
-<p>Realize there is no hash-based detection at all</p>
+<p>Discover that Rule 6 has no signatures without --signatures flag</p>
 </a>
 
 </div>
@@ -218,6 +218,70 @@ Target the EDR's ETW telemetry pipeline. The agent registers a custom ETW provid
 <span class="badge badge-hard">Hard</span>
 <h3>28 - Hardware Breakpoint Hook</h3>
 <p>Use debug registers and a VEH to intercept EtwEventWrite without modifying code bytes</p>
+</a>
+
+</div>
+
+## Category 8: Signature Bypass
+
+Requires `--signatures` flag (e.g. `--signatures signatures/malware_hashes.txt`). These challenges target Rule 6's SHA256-based signature detection.
+
+<div class="challenge-grid">
+
+<a href="{{ '/challenges/29-single-byte-patch/' | relative_url }}" class="challenge-card">
+<span class="badge badge-easy">Easy</span>
+<h3>29 - Single-Byte Hash Evasion</h3>
+<p>Change one byte of a known binary to produce a completely different SHA256 hash</p>
+</a>
+
+<a href="{{ '/challenges/30-read-signature-file/' | relative_url }}" class="challenge-card">
+<span class="badge badge-easy">Easy</span>
+<h3>30 - Read the Signature Database</h3>
+<p>The plaintext signature file reveals exactly which hashes the EDR knows</p>
+</a>
+
+<a href="{{ '/challenges/31-process-hollowing/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>31 - Process Hollowing vs Hash Check</h3>
+<p>Replace process memory after creation — the on-disk image hash stays clean</p>
+</a>
+
+<a href="{{ '/challenges/32-recompile-from-source/' | relative_url }}" class="challenge-card">
+<span class="badge badge-easy">Easy</span>
+<h3>32 - Recompile from Source</h3>
+<p>Same source code, different compiler run, completely different hash</p>
+</a>
+
+</div>
+
+## Category 9: Packer & PE Evasion
+
+These challenges target Rule 9's PE structure analysis — packer detection, section name matching, and header integrity checks.
+
+<div class="challenge-grid">
+
+<a href="{{ '/challenges/33-upx-section-rename/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>33 - UPX Section Name Rename</h3>
+<p>Pack with UPX to change the hash, then rename UPX0/UPX1 sections to evade packer detection</p>
+</a>
+
+<a href="{{ '/challenges/34-custom-packer/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>34 - Custom Packer / Crypter</h3>
+<p>Build a custom packer with normal section names and no RWX — invisible to static analysis</p>
+</a>
+
+<a href="{{ '/challenges/35-pe-header-obfuscation/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>35 - PE Header Obfuscation</h3>
+<p>Use Astral-PE style header corruption to crash the EDR's PE parser silently</p>
+</a>
+
+<a href="{{ '/challenges/36-runtime-unpacking/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>36 - Runtime Unpacking</h3>
+<p>Clean stub on disk, decrypt and execute payload in memory — the EDR never re-scans</p>
 </a>
 
 </div>

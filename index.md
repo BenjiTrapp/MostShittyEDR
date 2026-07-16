@@ -9,15 +9,15 @@ title: "Home | MostShittyEDR"
   <p class="subtitle">The World's Most Intentionally Terrible EDR — an educational platform for understanding EDR detection and evasion techniques.</p>
   <div class="stats">
     <div class="stat">
-      <div class="stat-number">28</div>
+      <div class="stat-number">36</div>
       <div class="stat-label">Challenges</div>
     </div>
     <div class="stat">
-      <div class="stat-number">7</div>
+      <div class="stat-number">9</div>
       <div class="stat-label">Categories</div>
     </div>
     <div class="stat">
-      <div class="stat-number">28</div>
+      <div class="stat-number">36</div>
       <div class="stat-label">Solutions</div>
     </div>
   </div>
@@ -89,9 +89,27 @@ title: "Home | MostShittyEDR"
     </div>
   </a>
 
+  <a href="{{ '/challenges/#category-8-signature-bypass' | relative_url }}" class="card">
+    <div class="card-title">Signature Bypass</div>
+    <div class="card-description">Evade SHA256 hash-based detection via byte patching, signature file enumeration, process hollowing, and recompilation.</div>
+    <div class="card-meta">
+      <span class="badge badge-category">4 Challenges</span>
+      <span class="badge badge-hard">Easy - Hard</span>
+    </div>
+  </a>
+
+  <a href="{{ '/challenges/#category-9-packer--pe-evasion' | relative_url }}" class="card">
+    <div class="card-title">Packer & PE Evasion</div>
+    <div class="card-description">Evade PE structure analysis via UPX section renaming, custom packers, Astral-PE header obfuscation, and runtime unpacking.</div>
+    <div class="card-meta">
+      <span class="badge badge-category">4 Challenges</span>
+      <span class="badge badge-hard">Medium - Hard</span>
+    </div>
+  </a>
+
   <a href="{{ '/challenges/' | relative_url }}" class="card">
     <div class="card-title">Getting Started</div>
-    <div class="card-description">New here? Browse all 28 challenges, pick your difficulty, and start bypassing.</div>
+    <div class="card-description">New here? Browse all 36 challenges, pick your difficulty, and start bypassing.</div>
     <div class="card-meta">
       <span class="badge badge-category">Guide</span>
     </div>
@@ -102,7 +120,7 @@ title: "Home | MostShittyEDR"
 
 ## How It Works
 
-The MostShittyEDR agent implements **8 detection rules** with intentional weaknesses:
+The MostShittyEDR agent implements **9 detection rules** with intentional weaknesses:
 
 | Rule | Method | Action | Exploitable? |
 |------|--------|--------|:---:|
@@ -111,9 +129,10 @@ The MostShittyEDR agent implements **8 detection rules** with intentional weakne
 | 3 | Reconnaissance Detection | `discard` | Yes |
 | 4 | LSASS Dump Detection (dual condition) | **BLOCKS** | Yes |
 | 5 | PowerShell Analysis (flags) | **BLOCKS** | Yes |
-| 6 | Hash-Based Detection (empty DB) | `discard` | Yes |
+| 6 | Hash-Based Detection (SHA256, `--signatures`) | **BLOCKS** | Yes |
 | 7 | Hooked API Import Detection | **ALERTS** | Yes |
 | 8 | ETW Integrity Check | **BLOCKS** | Yes |
+| 9 | PE Structure Analysis (packer/header) | **ALERTS** | Yes |
 
 > **Note:** This is NOT production security software. It is an educational tool designed for understanding EDR evasion techniques in a safe, controlled environment.
 

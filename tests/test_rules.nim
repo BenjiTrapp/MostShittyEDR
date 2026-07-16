@@ -1,6 +1,6 @@
 ## MostShittyEDR - Detection Rule Unit Tests
 ##
-## Tests all 8 detection rules, verifying both detection AND intentional
+## Tests all 9 detection rules, verifying both detection AND intentional
 ## bypass weaknesses. Each test documents which challenge it validates.
 ##
 ## Run: nim c -r -d:testing tests/test_rules.nim
@@ -234,12 +234,67 @@ suite "Rule 5 - PowerShell Analysis":
 
 suite "Rule 6 - Hash-Based Detection":
 
-  test "always returns empty - database is empty (Challenge 20)":
+  test "returns empty when no signatures loaded (Challenge 20)":
+    let saved = gSignatureHashes
+    gSignatureHashes = @[]
     let dets = ruleHashCheck(mkProcess("malware.exe", "malware --evil"))
     check dets.len == 0
+    gSignatureHashes = saved
 
-  test "KnownMalwareHashes is empty":
-    check KnownMalwareHashes.len == 0
+  test "signature database is empty by default":
+    check gSignatureHashes.len == 0
+
+  test "sha256File returns 64-char hex for existing file":
+    let h = sha256File(getAppFilename())
+    check h.len == 64
+
+  test "sha256File returns empty for nonexistent file":
+    let h = sha256File("C:\\nonexistent_file_12345.exe")
+    check h.len == 0
+
+  test "detects file matching loaded signature":
+    let selfHash = sha256File(getAppFilename())
+    let saved = gSignatureHashes
+    gSignatureHashes = @[selfHash]
+    let info = mkProcess("test.exe", "", getAppFilename())
+    let dets = ruleHashCheck(info)
+    check dets.len == 1
+    check dets[0].ruleId == 6
+    gSignatureHashes = saved
+
+  test "BYPASS: modified binary not detected (Challenge 29)":
+    let saved = gSignatureHashes
+    gSignatureHashes = @["aaaa" & "b".repeat(60)]
+    let info = mkProcess("test.exe", "", getAppFilename())
+    let dets = ruleHashCheck(info)
+    check dets.len == 0
+    gSignatureHashes = saved
+
+# ============================================================
+# Signature Loading
+# ============================================================
+
+suite "Signature Loading":
+
+  test "loads valid signature file":
+    let count = loadSignatures("signatures/malware_hashes.txt")
+    check count >= 8
+    check gSignatureHashes.len == count
+
+  test "skips comments and empty lines":
+    let count = loadSignatures("signatures/malware_hashes.txt")
+    for h in gSignatureHashes:
+      check not h.startsWith("#")
+      check h.len == 64
+
+  test "returns 0 for nonexistent file":
+    let count = loadSignatures("nonexistent_file.txt")
+    check count == 0
+
+  test "all hashes are lowercase":
+    discard loadSignatures("signatures/malware_hashes.txt")
+    for h in gSignatureHashes:
+      check h == h.toLowerAscii()
 
 # ============================================================
 # Rule 7: Hooked API Import Detection
@@ -283,6 +338,96 @@ suite "Rule 8 - ETW Integrity":
     gEtwTamperAlerted = false
 
 # ============================================================
+# Rule 9: PE Structure Analysis
+# ============================================================
+
+suite "Rule 9 - PE Structure Analysis":
+
+  test "returns valid analysis for own executable":
+    let pe = analyzePeStructure(getAppFilename())
+    check pe.valid == true
+    check pe.sectionNames.len > 0
+
+  test "returns invalid for nonexistent file":
+    let pe = analyzePeStructure("C:\\nonexistent_binary_12345.exe")
+    check pe.valid == false
+
+  test "returns invalid for empty path":
+    let pe = analyzePeStructure("")
+    check pe.valid == false
+
+  test "detects known packer section name 'UPX0'":
+    let pe = PeAnalysis(
+      valid: true,
+      sectionNames: @["UPX0", "UPX1", ".rsrc"],
+      hasPackerSections: true,
+      packerName: "UPX",
+      rwxSections: @[],
+      hollowSections: @[],
+      entryPointSection: "UPX1",
+      entryInFirstSection: true
+    )
+    check pe.hasPackerSections == true
+    check pe.packerName == "UPX"
+
+  test "rulePeStructure returns no alerts for clean binary":
+    let info = mkProcess("explorer.exe", "", getAppFilename())
+    let dets = rulePeStructure(info)
+    for d in dets:
+      check d.ruleName != "PACKED_BINARY"
+
+  test "rulePeStructure returns empty for nonexistent file":
+    let info = mkProcess("fake.exe", "", "C:\\nonexistent_12345.exe")
+    let dets = rulePeStructure(info)
+    check dets.len == 0
+
+  test "rulePeStructure returns empty for empty imagePath":
+    let info = mkProcess("test.exe", "", "")
+    let dets = rulePeStructure(info)
+    check dets.len == 0
+
+  test "own binary has standard section names":
+    let pe = analyzePeStructure(getAppFilename())
+    check pe.valid
+    check ".text" in pe.sectionNames or ".code" in pe.sectionNames
+
+  test "own binary has entry point in first section":
+    let pe = analyzePeStructure(getAppFilename())
+    check pe.valid
+    check pe.entryInFirstSection == true
+
+  test "BYPASS: renamed UPX sections not detected (Challenge 33)":
+    let pe = PeAnalysis(
+      valid: true,
+      sectionNames: @[".text", ".rdata", ".rsrc"],
+      hasPackerSections: false,
+      packerName: "",
+      rwxSections: @[],
+      hollowSections: @[],
+      entryPointSection: ".text",
+      entryInFirstSection: true
+    )
+    check pe.hasPackerSections == false
+
+  test "BYPASS: custom packer with normal names invisible (Challenge 34)":
+    let info = mkProcess("loader.exe", "", getAppFilename())
+    let dets = rulePeStructure(info)
+    var hasPacked = false
+    for d in dets:
+      if d.ruleName == "PACKED_BINARY":
+        hasPacked = true
+    check hasPacked == false
+
+  test "PackerSectionNames contains UPX variants":
+    check "UPX0" in PackerSectionNames
+    check "UPX1" in PackerSectionNames
+    check "UPX!" in PackerSectionNames
+
+  test "PackerSectionNames contains ASPack markers":
+    check ".aspack" in PackerSectionNames
+    check ".adata" in PackerSectionNames
+
+# ============================================================
 # Analysis Engine Integration
 # ============================================================
 
@@ -306,10 +451,13 @@ suite "Analysis Engine":
     check reconDets.len >= 1
     check reconDets[0].ruleId == 3
 
-  test "hash check always empty":
+  test "hash check empty without signatures":
     let info = mkProcess("malware.exe", "malware --execute")
+    let saved = gSignatureHashes
+    gSignatureHashes = @[]
     let hashDets = ruleHashCheck(info)
     check hashDets.len == 0
+    gSignatureHashes = saved
 
   test "clean process returns no detections":
     let info = mkProcess("explorer.exe", "C:\\Windows\\explorer.exe")
