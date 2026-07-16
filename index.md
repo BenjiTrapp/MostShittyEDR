@@ -9,15 +9,15 @@ title: "Home | MostShittyEDR"
   <p class="subtitle">The World's Most Intentionally Terrible EDR — an educational platform for understanding EDR detection and evasion techniques.</p>
   <div class="stats">
     <div class="stat">
-      <div class="stat-number">36</div>
+      <div class="stat-number">39</div>
       <div class="stat-label">Challenges</div>
     </div>
     <div class="stat">
-      <div class="stat-number">9</div>
+      <div class="stat-number">10</div>
       <div class="stat-label">Categories</div>
     </div>
     <div class="stat">
-      <div class="stat-number">36</div>
+      <div class="stat-number">39</div>
       <div class="stat-label">Solutions</div>
     </div>
   </div>
@@ -107,9 +107,18 @@ title: "Home | MostShittyEDR"
     </div>
   </a>
 
+  <a href="{{ '/challenges/#category-10-byovd--kernel-attacks' | relative_url }}" class="card">
+    <div class="card-title">BYOVD / Kernel Attacks</div>
+    <div class="card-description">Bring Your Own Vulnerable Driver — kill the EDR, remove kernel callbacks, and blind ETW-TI using signed drivers with kernel R/W primitives.</div>
+    <div class="card-meta">
+      <span class="badge badge-category">3 Challenges</span>
+      <span class="badge badge-hard">Hard</span>
+    </div>
+  </a>
+
   <a href="{{ '/challenges/' | relative_url }}" class="card">
     <div class="card-title">Getting Started</div>
-    <div class="card-description">New here? Browse all 36 challenges, pick your difficulty, and start bypassing.</div>
+    <div class="card-description">New here? Browse all 39 challenges, pick your difficulty, and start bypassing.</div>
     <div class="card-meta">
       <span class="badge badge-category">Guide</span>
     </div>
@@ -149,6 +158,9 @@ make build
 
 # Run in safe mode (detect only, no kills)
 .\edr_agent.exe --verbose --no-kill
+
+# Run with kernel driver (requires loaded driver + admin)
+.\edr_agent.exe --driver --verbose
 ```
 
 Browse the [Challenges]({{ '/challenges/' | relative_url }}) to begin, or check the [MostShittyAV](https://benjitrapp.github.io/MostShittyAV/) companion lab for AMSI bypass challenges.
@@ -182,6 +194,12 @@ Deep-dive blog posts on EDR internals, bypass techniques, and defensive telemetr
     <span class="card-tag">Syscalls</span>
     <div class="card-title">Hell's Gate, Heaven's Gate & Tartarus Gate</div>
     <div class="card-description">Direct and indirect syscall techniques to bypass user-mode EDR hooks entirely.</div>
+  </a>
+
+  <a href="https://benjitrapp.github.io/attacks/2026-06-24-byovd-ioctl-edr-killer/" class="reading-card" target="_blank">
+    <span class="card-tag">BYOVD</span>
+    <div class="card-title">BYOVD & IOCTL EDR Killer</div>
+    <div class="card-description">Using vulnerable signed drivers to kill EDR agents from kernel level via IOCTL-based process termination and callback removal.</div>
   </a>
 
   <a href="https://benjitrapp.github.io/defenses/2026-06-19-etw-ti/" class="reading-card" target="_blank">

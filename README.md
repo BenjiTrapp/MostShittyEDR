@@ -14,9 +14,9 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg?style=flat-square&logo=windows)](https://www.microsoft.com/windows)
 [![Status](https://img.shields.io/badge/status-Educational%20Only-red.svg?style=flat-square)](README.md)
 
-**An educational EDR agent built in Nim to demonstrate process monitoring, detection techniques, and their bypasses.**
+**An educational EDR agent built in Nim with an optional kernel driver for learning detection techniques and their bypasses.**
 
-[Features](#-features) • [Quick Start](#quick-start) • [Challenges](#-the-challenge) • [Architecture](#-architecture) • [Detection Methods](#-detection-methods-explained) • [EDR Explained](https://benjitrapp.github.io/MostShittyEDR/edr-explained/) • [Resources](#-resources)
+[Features](#features) • [Quick Start](#quick-start) • [Driver Mode](#kernel-driver-mode) • [Challenges](#the-challenge) • [Architecture](#architecture) • [EDR Explained](https://benjitrapp.github.io/MostShittyEDR/edr-explained/) • [Resources](#resources)
 
 </div>
 
@@ -24,7 +24,11 @@
 
 ## Overview
 
-**MostShittyEDR** is a deliberately weak EDR agent designed for **security research**, **education**, and **red team training**. It implements basic detection methods that mirror real-world EDR engines but with intentional weaknesses mapped to specific bypass challenges.
+**MostShittyEDR** is a deliberately weak EDR agent designed for **security research**, **education**, and **red team training**. It implements detection methods that mirror real-world EDR engines but with intentional weaknesses mapped to **39 bypass challenges** across **10 categories**.
+
+The project has two operating modes:
+- **User-mode** (default) — polls processes via Toolhelp32 snapshots
+- **Kernel-mode** (`--driver`) — receives real-time events from a kernel driver via IOCTLs, with kernel-level process blocking, LSASS handle protection, and hardware-enforced kill
 
 > *"If you can't bypass this, you definitely need more practice"*
 
@@ -38,41 +42,41 @@
 <tr>
 <td width="50%">
 
-### Detection Engines
+### 9 Detection Rules
 
-- **Process Name Blacklist**
-  - Case-sensitive exact match
-  - 12 hardcoded tool names
-  - No path or hash validation
-
-- **Command Line Analysis**
-  - Keyword substring search
-  - No deobfuscation support
-  - ASCII-only toLower
-
-- **LSASS Dump Detection**
-  - Tool name + keyword dual match
-  - Easily broken by renaming
+| Rule | Method | Action |
+|------|--------|--------|
+| 1 | Process Name Blacklist (12 names) | **BLOCKS** |
+| 2 | Command Line Keywords (substring) | **BLOCKS** |
+| 3 | Reconnaissance Detection | `discard` |
+| 4 | LSASS Dump Detection (dual condition) | **BLOCKS** |
+| 5 | PowerShell Analysis (flags) | **BLOCKS** |
+| 6 | Hash-Based Detection (SHA256, `--signatures`) | **BLOCKS** |
+| 7 | Hooked API Import Detection (`--profile`) | **ALERTS** |
+| 8 | ETW Integrity Check | **BLOCKS** |
+| 9 | PE Structure Analysis (packer/header) | **ALERTS** |
 
 </td>
 <td width="50%">
 
 ### Technical Features
 
-- **Process Monitoring**
-  - Toolhelp32 snapshot polling
-  - PEB reading for command lines
-  - 64-bit process support
+- **Dual-mode monitoring**
+  - User-mode: Toolhelp32 snapshot polling
+  - Kernel-mode: driver callbacks via `--driver`
 
-- **Response Actions**
-  - Process termination (configurable)
-  - Detection-only mode (--no-kill)
-  - Adjustable poll interval
+- **Kernel driver integration**
+  - Process/thread creation callbacks
+  - LSASS handle guard (ObRegisterCallbacks)
+  - Kernel-level process blocking & termination
+  - Overlapped I/O with async event delivery
 
-- **Detailed Logging**
-  - Timestamped output
-  - Color-coded severity levels
-  - Step-by-step detection trace
+- **EDR hook profiles**
+  - Real hook data from CrowdStrike, Carbon Black, Cylance, Bitdefender, Cortex, Checkpoint
+
+- **ETW telemetry**
+  - Custom ETW provider & trace session
+  - Integrity monitoring (tamper detection)
 
 </td>
 </tr>
@@ -84,8 +88,10 @@
 
 ### Prerequisites
 
-```bash
-# Windows with Nim 2.0+
+- Windows 10/11 (64-bit)
+- [Nim 2.0+](https://nim-lang.org/) with MinGW
+
+```powershell
 winget install nim-lang.Nim
 ```
 
@@ -99,26 +105,101 @@ make build
 nimble install winim -y
 nim c -d:release --opt:size -o:edr_agent.exe src/edr_agent.nim
 
-# Run the EDR agent (verbose mode)
-.\edr_agent.exe --verbose
-
-# Run in detection-only mode (no process termination)
+# Run in detection-only mode
 .\edr_agent.exe --verbose --no-kill
 
-# Set custom polling interval (ms)
-.\edr_agent.exe --interval 1000
+# Run with hash signatures
+.\edr_agent.exe --verbose --signatures signatures/malware_hashes.txt
+
+# Run with EDR hook profile
+.\edr_agent.exe --verbose --profile crowdstrike
+
+# Run with kernel driver (requires loaded driver + admin)
+.\edr_agent.exe --driver --verbose
 ```
+
+### Command-Line Options
+
+| Flag | Description |
+|------|-------------|
+| `--verbose`, `-v` | Show all new processes (not just detections) |
+| `--no-kill`, `-n` | Detect but don't terminate processes |
+| `--interval MS` | Set polling interval in ms (default: 500, min: 50) |
+| `--profile NAME` | Load EDR hook profile for Rule 7 |
+| `--signatures FILE` | Load SHA256 hash signatures for Rule 6 |
+| `--driver` | Connect to kernel driver for real-time monitoring |
+| `--no-etw` | Disable ETW telemetry provider and Rule 8 |
+| `--list-profiles` | Show available hook profiles |
 
 ### Lab Usage
 
 ```powershell
 # Terminal 1: Start the EDR agent
-.\edr_agent.exe --verbose --no-kill
+.\edr_agent.exe --verbose --no-kill --signatures signatures/malware_hashes.txt
 
 # Terminal 2: Try to execute commands without being detected
-whoami          # This WILL be detected
+whoami          # This WILL be detected (Rule 3, but discarded)
+mimikatz.exe    # This WILL be blocked (Rule 1)
 # Can you find a way that won't be?
 ```
+
+---
+
+## Kernel Driver Mode
+
+The `--driver` flag connects the agent to the kernel driver (`\\.\MostShittyEDR`) for real-time, event-driven monitoring instead of user-mode polling.
+
+### What the driver provides
+
+- **Process creation callbacks** via `PsSetCreateProcessNotifyRoutineEx` — every process start/exit is observed
+- **Thread creation callbacks** via `PsSetCreateThreadNotifyRoutine` — thread lifecycle events
+- **LSASS handle protection** via `ObRegisterCallbacks` — strips `PROCESS_VM_READ` and `PROCESS_QUERY_INFORMATION` from LSASS handles
+- **Kernel-level block rules** — the agent pushes block rules (process name + command-line patterns) to the kernel, which can deny process creation before it starts
+- **Kernel-level process termination** — uses `ZwTerminateProcess` from ring 0 instead of user-mode `TerminateProcess`
+
+### Communication protocol
+
+The agent communicates with the driver via 5 IOCTLs over `\\.\MostShittyEDR`:
+
+| IOCTL | Code | Direction | Purpose |
+|-------|------|-----------|---------|
+| `WAIT_FOR_EVENT` | `0x222000` | Kernel → Agent | Agent blocks until next event (overlapped I/O) |
+| `KILL_PROCESS` | `0x222004` | Agent → Kernel | Kernel-level process termination |
+| `ADD_BLOCK_RULE` | `0x222008` | Agent → Kernel | Push block rule (image suffix + cmdline substr) |
+| `CLEAR_BLOCK_RULES` | `0x22200C` | Agent → Kernel | Reset all block rules |
+| `SIGNAL_LSASS_DUMP` | `0x222010` | Agent → Kernel | Signal LSASS dump — kernel kills dumper + logs event |
+
+### Driver setup
+
+```powershell
+# Use the install script (requires Administrator)
+.\install_driver.ps1 -Install
+
+# Or manually:
+# 1. Enable test-signing (one-time, requires reboot)
+bcdedit /set testsigning on
+
+# 2. Register and start the driver
+sc.exe create MostShittyEDR type= kernel binPath= C:\path\to\driver.sys
+sc.exe start MostShittyEDR
+
+# 3. Run the agent with --driver
+.\edr_agent.exe --driver --verbose
+
+# Uninstall
+.\install_driver.ps1 -Uninstall
+```
+
+### User-mode vs Kernel-mode
+
+| | User-mode (default) | Kernel-mode (`--driver`) |
+|---|---|---|
+| **Monitoring** | Toolhelp32 polling (500ms gaps) | Kernel callbacks (no gaps) |
+| **Process blocking** | Kill after detection | Deny creation before start |
+| **LSASS protection** | Keyword matching only | Handle permission stripping |
+| **Process termination** | `TerminateProcess` (user-mode) | `ZwTerminateProcess` (ring 0) |
+| **Evasion difficulty** | Easy (timing, elevation) | Harder (needs kernel access) |
+| **Requirements** | None | WDK, test-signing, Administrator |
 
 ---
 
@@ -135,44 +216,28 @@ whoami          # This WILL be detected
 - :unlock: Recon detection is theater (Rule 3 detects but discards the result)
 - :unlock: LSASS rule needs dual match (rename tool OR omit "lsass" keyword)
 - :unlock: Only monitors `powershell.exe` (not `pwsh.exe`)
-- :unlock: Empty hash database (Rule 6 has zero entries)
-- :unlock: Polling-based monitoring (timing gaps between scans)
-- :unlock: No pre-existing process analysis (start before EDR = invisible)
+- :unlock: Plaintext signature file is readable and exact-match only
+- :unlock: Static import analysis bypassed by dynamic resolution or direct syscalls
+- :unlock: ETW session has hardcoded name, patchable `EtwEventWrite`
+- :unlock: PE analysis has no entropy check, strict parser crashes on corrupted headers
+- :unlock: Polling-based monitoring has timing gaps (without `--driver`)
 
-**20 challenges across 5 categories, from Easy to Hard!**
+### Challenge Categories
 
----
+| Category | Challenges | Difficulty | Target Rules |
+|----------|-----------|-----------|--------------|
+| **Process Name Evasion** | 01-04 | Easy | Rule 1 |
+| **Command Line Obfuscation** | 05-09 | Easy-Medium | Rules 2, 3, 5 |
+| **Process Monitoring Bypass** | 10-14 | Medium | Architecture, Rule 4 |
+| **Execution Evasion** | 15-18 | Medium-Hard | Architecture, Rule 5 |
+| **Advanced Bypass** | 19-20 | Easy-Hard | Architecture, Rule 6 |
+| **API Hook Evasion** | 21-24 | Medium-Hard | Rule 7 |
+| **ETW Bypass** | 25-28 | Easy-Hard | Rule 8 |
+| **Signature Bypass** | 29-32 | Easy-Hard | Rule 6 |
+| **Packer & PE Evasion** | 33-36 | Medium-Hard | Rule 9 |
+| **BYOVD / Kernel Attacks** | 37-39 | Hard | Kernel Driver |
 
-## Example Output
-
-```console
-  __  __         _   ___ _    _ _   _          ___ ___  ___
- |  \/  |___ ___| |_/ __| |_ (_) |_| |_ _  _ | __|   \| _ \
- | |\/| / _ (_-<  _\__ \ ' \| |  _|  _| || | | _|| |) |   /
- |_|  |_\___/__/\__|___/_||_|_|\__|\__|\_, | |___|___/|_|_\
-                                        |__/
-
-  The World's Most Intentionally Terrible EDR
-  "If you can't bypass this, you definitely need more practice"
-
-  Detection Rules:
-    [1] Process Name Blacklist    (12 entries)
-    [2] Command Line Keywords     (12 patterns)
-    [3] Recon Command Detection   (13 commands) [WARN ONLY]
-    [4] LSASS Dump Detection      (8 indicators)
-    [5] PowerShell Flag Analysis  (8 flags)
-    [6] Hash-Based Detection      (0 hashes) [EMPTY]
-
-[14:23:01.337] Initial snapshot: 142 processes
-[14:23:01.337] Monitoring for new processes... (Ctrl+C to stop)
-============================================================
-
-[14:23:05.841] [CRITICAL] Blacklisted process detected: mimikatz.exe
-               PID: 8472 | Image: mimikatz.exe
-               [ACTION] Terminating PID 8472
-               [+] Process terminated successfully
-[14:23:12.105] [OK]       chrome.exe (PID: 9104)
-```
+**39 challenges** with full solutions at the [Challenge Browser](https://benjitrapp.github.io/MostShittyEDR/challenges/).
 
 ---
 
@@ -181,14 +246,60 @@ whoami          # This WILL be detected
 ### Detection Pipeline
 
 ```
-New Process Detected (via Toolhelp32 polling)
+Process Event (polling or kernel callback)
     |
-    +-> Rule 1: Process Name Blacklist  --> KILL (case-sensitive!)
-    +-> Rule 2: Command Line Keywords   --> KILL (no deobfuscation!)
-    +-> Rule 3: Recon Detection         --> discard (never blocks!)
-    +-> Rule 4: LSASS Dump Detection    --> KILL (needs both conditions!)
-    +-> Rule 5: PowerShell Analysis     --> ALERT (only powershell.exe!)
-    +-> Rule 6: Hash Check              --> discard (empty database!)
+    +-> Rule 1: Process Name Blacklist   --> KILL   (case-sensitive!)
+    +-> Rule 2: Command Line Keywords    --> KILL   (no deobfuscation!)
+    +-> Rule 3: Recon Detection          --> discard (never blocks!)
+    +-> Rule 4: LSASS Dump Detection     --> KILL   (needs both conditions!)
+    +-> Rule 5: PowerShell Analysis      --> KILL   (only powershell.exe!)
+    +-> Rule 6: Hash Check (SHA256)      --> KILL   (exact match, on-disk only!)
+    +-> Rule 7: Hooked API Imports       --> ALERT  (static imports only!)
+    +-> Rule 8: ETW Integrity            --> KILL   (user-mode only!)
+    +-> Rule 9: PE Structure Analysis    --> ALERT  (no entropy, strict parser!)
+```
+
+### Dual-Mode Architecture
+
+```mermaid
+graph TB
+    subgraph Kernel["🔒 Kernel Driver (--driver mode)"]
+        direction TB
+        CB1["PsSetCreateProcessNotifyRoutineEx<br/>→ ProcessCallback"]
+        CB2["PsSetCreateThreadNotifyRoutine<br/>→ ThreadCallback"]
+        CB3["ObRegisterCallbacks<br/>→ LsassHandleGuard"]
+        EQ["📋 Event Queue<br/>(LIST_ENTRY FIFO)"]
+        BR["🚫 Block Rules<br/>(up to 64)"]
+        IRP["⏳ Pending IRP<br/>(single-slot)"]
+
+        CB1 --> EQ
+        CB2 --> EQ
+        CB3 --> EQ
+        BR -->|deny creation| CB1
+        EQ --> IRP
+    end
+
+    subgraph Device["IOCTL Interface — \\\\.\\MostShittyEDR"]
+        direction LR
+        I1["WAIT_FOR_EVENT<br/>0x222000"]
+        I2["KILL_PROCESS<br/>0x222004"]
+        I3["ADD_BLOCK_RULE<br/>0x222008"]
+        I4["CLEAR_RULES<br/>0x22200C"]
+        I5["SIGNAL_LSASS<br/>0x222010"]
+    end
+
+    subgraph User["🛡️ Nim Agent (edr_agent.exe)"]
+        direction TB
+        Rules["Rules 1-9"]
+        ETW["ETW Telemetry"]
+        Sigs["Hash Signatures"]
+        Hooks["Hook Profiles"]
+    end
+
+    IRP -->|overlapped I/O| I1
+    I1 -->|EDR_EVENT struct| User
+    User -->|EdrCommand struct| I2
+    User -->|BlockRuleEntry struct| I3
 ```
 
 ### Project Structure
@@ -198,108 +309,45 @@ MostShittyEDR/
 ├── src/
 │   ├── edr_agent.nim              # User-mode EDR agent (Nim)
 │   └── driver/
-│       └── driver.cpp             # Kernel driver (C++, reference only)
-├── _challenges/                   # 20 bypass challenges
+│       └── driver.cpp             # Kernel driver (C++, WDK required)
+├── tests/
+│   ├── test_rules.nim             # 98 rule + ABI verification tests
+│   ├── test_profiles.nim          # 20 hook profile tests
+│   ├── test_driver_logic.cpp      # 44 driver logic tests (user-mode)
+│   └── test_driver_ioctl.cpp      # Driver IOCTL integration tests
+├── profiles/                      # Real EDR hook profiles
+├── signatures/
+│   └── malware_hashes.txt         # SHA256 signature database
+├── _challenges/                   # 39 bypass challenges
 ├── _solutions/                    # Detailed solution walkthroughs
-├── docs/                          # Technical documentation
-├── static/                        # Logo and assets
-├── _config.yml                    # GitHub Pages config
-├── _layouts/                      # Jekyll layouts
-├── assets/css/                    # Site styles
+├── install_driver.ps1             # Driver install/uninstall script
 ├── Makefile                       # Build automation
 └── MostShittyEDR.nimble           # Nim package config
 ```
 
 ---
 
-## Detection Methods Explained
+## Testing
 
-### 1. Process Name Blacklist
-```nim
-const blacklist = [
-  "mimikatz.exe", "rubeus.exe", "sharphound.exe",
-  "procdump.exe", "psexec.exe", "cobaltstrike.exe", ...
-]
-```
-Case-sensitive exact match against a static list. Rename = bypass.
+```powershell
+# Run all Nim tests (rules + profiles)
+make test-nim
 
-### 2. Command Line Keywords
-```nim
-const keywords = [
-  "sekurlsa", "kerberos::list", "invoke-mimikatz",
-  "dump", "hashdump", "lsass", ...
-]
-```
-Substring search with no deobfuscation. Carets, env vars, and encoding all bypass.
+# Run driver logic tests (no driver needed)
+make test-driver-logic
 
-### 3. Recon Detection (Security Theater)
-```nim
-const reconCmds = ["whoami", "ipconfig", "netstat", "systeminfo", ...]
-# Result is `discard`ed - detects but NEVER blocks
-```
-The detection fires but the result is thrown away. Pure theater.
+# Run driver IOCTL tests (requires loaded driver + admin)
+make test-driver-ioctl
 
-### 4. LSASS Dump Detection
-```nim
-# Requires BOTH conditions:
-# 1. Tool name matches (procdump, comsvcs, etc.)
-# 2. Command line contains "lsass"
-```
-Rename the tool OR omit the keyword and the rule fails.
-
-### 5. PowerShell Flag Analysis
-```nim
-# Only checks processes named "powershell.exe"
-# pwsh.exe, cmd.exe /c powershell, and PowerShell ISE are invisible
+# Run all safe tests
+make test
 ```
 
-### 6. Hash-Based Detection
-```nim
-const hashDB: seq[string] = @[]  # Empty!
-```
-Zero entries. Enterprise-grade security theater.
-
----
-
-## Challenge Categories
-
-| Category | Challenges | Difficulty | Target |
-|----------|-----------|-----------|--------|
-| **Process Name Evasion** | 01-04 | Easy | Rule 1 |
-| **Command Line Obfuscation** | 05-09 | Easy-Medium | Rules 2, 3, 5 |
-| **Process Monitoring Bypass** | 10-14 | Medium | Architecture, Rule 4 |
-| **Execution Evasion** | 15-18 | Medium-Hard | Architecture, Rule 5 |
-| **Advanced Bypass** | 19-20 | Easy-Hard | Architecture, Rule 6 |
-
-See the [Challenge Browser](https://benjitrapp.github.io/MostShittyEDR/challenges/) for full descriptions with hints, and the [Solutions](https://benjitrapp.github.io/MostShittyEDR/solutions/) for detailed walkthroughs.
-
----
-
-## Kernel Driver (Advanced Reference)
-
-The `src/driver/driver.cpp` contains a Windows kernel driver providing:
-
-- Process creation/exit callbacks via `PsSetCreateProcessNotifyRoutineEx`
-- Thread creation/exit callbacks via `PsSetCreateThreadNotifyRoutine`
-- LSASS handle protection via `ObRegisterCallbacks`
-- Kernel-level process blocking rules
-- IOCTL communication with user-mode agents
-
-> The kernel driver requires the Windows Driver Kit (WDK) and test-signing mode. It is included as educational reference material.
-
----
-
-## Educational Value
-
-This project demonstrates:
-
-- :white_check_mark: **EDR Architecture** - Agent pattern, polling, detection pipelines
-- :white_check_mark: **Process Monitoring** - Toolhelp32 snapshots, PEB reading
-- :white_check_mark: **Detection Rules** - Blacklists, keywords, heuristics, hashes
-- :white_check_mark: **Rule Weaknesses** - Case sensitivity, missing deobfuscation, timing gaps
-- :white_check_mark: **Evasion Techniques** - Renaming, encoding, timing, privilege escalation
-- :white_check_mark: **Kernel vs User-Mode** - Why user-mode polling is fundamentally limited
-- :white_check_mark: **Nim Programming** - Windows API, process manipulation, systems programming
+The test suite includes **162 tests**:
+- 98 detection rule tests (Rules 1-9, helpers, analysis engine)
+- 24 driver ABI verification tests (struct sizes, field offsets, IOCTL codes)
+- 20 hook profile tests
+- 20 driver logic tests (C++)
 
 ---
 
@@ -309,18 +357,20 @@ This project demonstrates:
 - [EDR Explained (MostShittyEDR)](https://benjitrapp.github.io/MostShittyEDR/edr-explained/) - How real EDRs work
 - [Understanding and Attacking EDRs](https://benjitrapp.github.io/attacks/2024-08-21-edr-and-malware/) - Deep dive into hooking, syscalls, and kernel bypass
 - [EDR Bypass Roadmap](https://benjitrapp.github.io/attacks/2026-01-18-EDR-bypass-roadmap/) - Strategic approach to bypassing EDR
+- [BYOVD & IOCTL EDR Killer](https://benjitrapp.github.io/attacks/2026-06-24-byovd-ioctl-edr-killer/) - Killing EDR agents via vulnerable driver IOCTLs
+- [ETW-TI Deep Dive](https://benjitrapp.github.io/defenses/2026-06-19-etw-ti/) - Kernel-level telemetry defense
+- [Breaking ETW and EDR](https://benjitrapp.github.io/attacks/2024-02-11-offensive-etw/) - Offensive ETW techniques
 
 ### Companion Projects
-- [MostShittyAV](https://github.com/BenjiTrapp/MostShittyAV) - The AMSI bypass companion lab
-
-### Nim Language
-- [Nim Official Website](https://nim-lang.org/)
-- [Nim Documentation](https://nim-lang.org/documentation.html)
-- [winim Package](https://github.com/nickelc/winim) - Windows API bindings for Nim
+- [MostShittyAV](https://github.com/BenjiTrapp/MostShittyAV) - The AMSI bypass companion lab (43 challenges)
 
 ### Security Research
 - [MITRE ATT&CK - Defense Evasion](https://attack.mitre.org/tactics/TA0005/)
 - [LOLBAS Project](https://lolbas-project.github.io/) - Living Off The Land Binaries
+- [Mr-Un1k0d3r/EDRs](https://github.com/Mr-Un1k0d3r/EDRs) - EDR hook data (used for profiles)
+- [Astral-PE](https://github.com/DosX-dev/Astral-PE) - PE header obfuscation (Challenge 35)
+- [NimBlackout](https://github.com/Helixo32/NimBlackout) - Nim BYOVD process killer (Challenge 37)
+- [EDRSandblast](https://github.com/wavestone-cdt/EDRSandblast) - Kernel callback removal & ETW-TI blinding (Challenges 38-39)
 
 ---
 

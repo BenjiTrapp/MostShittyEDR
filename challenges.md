@@ -6,7 +6,7 @@ permalink: /challenges/
 
 # EDR Bypass Challenges
 
-36 challenges across 9 categories. Start with Easy and work your way up.
+39 challenges across 10 categories. Start with Easy and work your way up.
 
 ## Category 1: Process Name Evasion
 
@@ -282,6 +282,32 @@ These challenges target Rule 9's PE structure analysis — packer detection, sec
 <span class="badge badge-hard">Hard</span>
 <h3>36 - Runtime Unpacking</h3>
 <p>Clean stub on disk, decrypt and execute payload in memory — the EDR never re-scans</p>
+</a>
+
+</div>
+
+## Category 10: BYOVD / Kernel Attacks
+
+Bring Your Own Vulnerable Driver — load a legitimately signed driver with dangerous kernel primitives to kill the EDR, remove its callbacks, or blind kernel-level telemetry. Requires Administrator and a vulnerable `.sys` file. See [BYOVD & IOCTL EDR Killer](https://benjitrapp.github.io/attacks/2026-06-24-byovd-ioctl-edr-killer/) for background, [NimBlackout](https://github.com/Helixo32/NimBlackout) and [EDRSandblast](https://github.com/wavestone-cdt/EDRSandblast) for reference implementations.
+
+<div class="challenge-grid">
+
+<a href="{{ '/challenges/37-byovd-kill-edr/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>37 - BYOVD: Kill the EDR</h3>
+<p>Load a vulnerable signed driver and terminate the EDR agent from kernel level</p>
+</a>
+
+<a href="{{ '/challenges/38-byovd-remove-callbacks/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>38 - BYOVD: Remove Callbacks</h3>
+<p>Use kernel R/W to enumerate and zero the driver's process/thread notification callbacks</p>
+</a>
+
+<a href="{{ '/challenges/39-byovd-blind-etw-ti/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>39 - BYOVD: Blind ETW-TI</h3>
+<p>Disable the kernel-level ETW Threat Intelligence provider via vulnerable driver R/W</p>
 </a>
 
 </div>

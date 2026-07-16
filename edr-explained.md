@@ -416,7 +416,7 @@ Use CPU debug registers (DR0-DR3) and a Vectored Exception Handler to intercept 
 
 The only way to bypass ETW-TI is with **kernel-level access**:
 
-- **BYOVD** (Bring Your Own Vulnerable Driver): Load a signed driver with known vulnerabilities, use it to zero `nt!EtwThreatIntProvRegHandle` — but PatchGuard may detect the modification
+- **BYOVD** (Bring Your Own Vulnerable Driver): Load a signed driver with known vulnerabilities, use it to zero `nt!EtwThreatIntProvRegHandle` — but PatchGuard may detect the modification. See [BYOVD & IOCTL EDR Killer](https://benjitrapp.github.io/attacks/2026-06-24-byovd-ioctl-edr-killer/) for the full IOCTL-based attack chain
 - **Kernel exploit**: Direct ring-0 code execution to manipulate EPROCESS logging flags
 - **NtSetInformationProcess** with `ProcessEnableLogging` class (patched in Windows 11, worked on some Windows 10 builds)
 
@@ -531,10 +531,12 @@ Kernel callbacks are not instantaneous and brief windows exist:
 ### 3. Kernel Trust Boundary
 
 If an attacker gains kernel access (e.g., via BYOVD, Bring Your Own Vulnerable Driver):
-- Callbacks can be unregistered
-- Minifilters can be detached
-- ETW providers can be disabled
-- The EDR agent itself can be terminated
+- Callbacks can be unregistered (zeroing `PspCreateProcessNotifyRoutine` entries)
+- Minifilters can be detached (unlinking `CALLBACK_NODE` from `FLT_VOLUME`)
+- ETW providers can be disabled (zeroing `TRACE_ENABLE_INFO.IsEnabled`)
+- The EDR agent itself can be terminated (kernel-level `ZwTerminateProcess`)
+
+BYOVD is one of the most effective EDR-killing techniques in the wild — tools like [NimBlackout](https://github.com/Helixo32/NimBlackout) and [EDRSandblast](https://github.com/wavestone-cdt/EDRSandblast) demonstrate how a single vulnerable signed driver (RTCore64.sys, Blackout.sys, DBUtil_2_3.sys) can dismantle an entire EDR stack. See [BYOVD & IOCTL EDR Killer](https://benjitrapp.github.io/attacks/2026-06-24-byovd-ioctl-edr-killer/) for a deep dive into the IOCTL-based attack chain.
 
 ### 4. Blind Spots
 
@@ -557,7 +559,7 @@ This lab deliberately implements each EDR concept in the weakest possible way:
 
 | Real EDR Feature | MostShittyEDR Implementation | Why It's Weak |
 |-----------------|------------------------------|---------------|
-| Kernel callbacks | User-mode polling (Toolhelp32) | Timing gaps, no kernel visibility |
+| Kernel callbacks | User-mode polling (Toolhelp32), or kernel callbacks via `--driver` | Without `--driver`: timing gaps, no kernel visibility. With: single-IRP design, one agent only |
 | Behavioral detection | Substring matching on command lines | No deobfuscation, no context |
 | Hash database | SHA256 from plaintext file (`--signatures`) | Exact-match only, on-disk only, readable signature file |
 | Process blocking | Case-sensitive name blacklist | Rename = bypass |
@@ -578,7 +580,7 @@ These are the primary categories of techniques used to evade EDR detection:
 | **Unhooking** | Restore original ntdll bytes from clean copy | Medium |
 | **Direct Syscalls** | Invoke syscall instruction directly, skipping hooks | Medium |
 | **Indirect Syscalls** | Jump to syscall instruction inside ntdll (avoids direct syscall detection) | Hard |
-| **BYOVD** | Load vulnerable signed driver for kernel access | Hard |
+| **BYOVD** | Load vulnerable signed driver for kernel access ([deep dive](https://benjitrapp.github.io/attacks/2026-06-24-byovd-ioctl-edr-killer/)) | Hard |
 | **Early Injection** | Inject before hooks are placed (Early Bird, Process Ghosting) | Hard |
 | **ETW Blinding** | Patch ETW functions to suppress telemetry | Medium |
 | **Minifilter Detach** | Unload or detach filesystem minifilters | Hard |
@@ -608,4 +610,5 @@ This is why modern EDRs use `PsSetCreateProcessNotifyRoutineEx` instead of SSDT 
 - [Offensive ETW](https://benjitrapp.github.io/attacks/2024-02-11-offensive-etw/) on attacking Event Tracing for Windows
 - [EDR Bypass Roadmap](https://benjitrapp.github.io/attacks/2026-01-18-EDR-bypass-roadmap/) for a strategic approach to bypassing EDR
 - [ETW Threat Intelligence](https://benjitrapp.github.io/defenses/2026-06-19-etw-ti/) on kernel-level telemetry defense
+- [BYOVD & IOCTL EDR Killer](https://benjitrapp.github.io/attacks/2026-06-24-byovd-ioctl-edr-killer/) on using vulnerable signed drivers to kill EDR agents via kernel IOCTLs
 - [MostShittyEDR Challenges](/MostShittyEDR/challenges/) to practice bypassing a deliberately weak EDR

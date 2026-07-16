@@ -491,3 +491,148 @@ suite "Helper Functions":
     buf[0] = WCHAR(0x00FC)  # ü
     buf[1] = 0
     check wcharToStr(buf) == "?"
+
+  test "strToWcharArray round-trips ASCII":
+    var buf: array[10, WCHAR]
+    strToWcharArray("test", buf)
+    check wcharToStr(buf) == "test"
+
+  test "strToWcharArray null-terminates":
+    var buf: array[10, WCHAR]
+    strToWcharArray("Hi", buf)
+    check buf[2] == 0
+
+  test "strToWcharArray truncates to buffer size":
+    var buf: array[4, WCHAR]
+    strToWcharArray("Hello World", buf)
+    check wcharToStr(buf) == "Hel"
+
+# ============================================================
+# Driver ABI Verification
+#
+# These tests ensure the Nim packed structs match the C driver's
+# #pragma pack(push, 1) structs exactly. A size mismatch means
+# DeviceIoControl would read/write garbage.
+# ============================================================
+
+suite "Driver ABI - Struct Sizes":
+
+  test "EdrEvent matches driver's EDR_EVENT (1581 bytes)":
+    # C layout: ULONG(4) + LARGE_INTEGER(8) + ULONG64(8) + ULONG64(8)
+    #         + ULONG64(8) + BOOLEAN(1) + WCHAR[260](520) + WCHAR[512](1024)
+    #         = 4+8+8+8+8+1+520+1024 = 1581
+    check sizeof(EdrEvent) == 1581
+
+  test "EdrCommand matches driver's EDR_COMMAND (12 bytes)":
+    # C layout: ULONG(4) + ULONG64(8) = 12
+    check sizeof(EdrCommand) == 12
+
+  test "BlockRuleEntry matches driver's BLOCK_RULE_ENTRY (1544 bytes)":
+    # C layout: WCHAR[260](520) + WCHAR[512](1024) = 1544
+    check sizeof(BlockRuleEntry) == 1544
+
+suite "Driver ABI - IOCTL Codes":
+
+  test "IOCTL_WAIT_FOR_EVENT = 0x222000":
+    check IOCTL_WAIT_FOR_EVENT == DWORD(0x222000)
+
+  test "IOCTL_KILL_PROCESS = 0x222004":
+    check IOCTL_KILL_PROCESS == DWORD(0x222004)
+
+  test "IOCTL_ADD_BLOCK_RULE = 0x222008":
+    check IOCTL_ADD_BLOCK_RULE == DWORD(0x222008)
+
+  test "IOCTL_CLEAR_BLOCK_RULES = 0x22200C":
+    check IOCTL_CLEAR_BLOCK_RULES == DWORD(0x22200C)
+
+  test "IOCTL_SIGNAL_LSASS_DUMP = 0x222010":
+    check IOCTL_SIGNAL_LSASS_DUMP == DWORD(0x222010)
+
+  test "all IOCTL codes are unique":
+    let codes = [IOCTL_WAIT_FOR_EVENT, IOCTL_KILL_PROCESS,
+                 IOCTL_ADD_BLOCK_RULE, IOCTL_CLEAR_BLOCK_RULES,
+                 IOCTL_SIGNAL_LSASS_DUMP]
+    for i in 0 ..< codes.len:
+      for j in (i+1) ..< codes.len:
+        check codes[i] != codes[j]
+
+  test "all IOCTLs use METHOD_BUFFERED (low 2 bits = 0)":
+    check (IOCTL_WAIT_FOR_EVENT and 3) == 0
+    check (IOCTL_KILL_PROCESS and 3) == 0
+    check (IOCTL_ADD_BLOCK_RULE and 3) == 0
+    check (IOCTL_CLEAR_BLOCK_RULES and 3) == 0
+    check (IOCTL_SIGNAL_LSASS_DUMP and 3) == 0
+
+suite "Driver ABI - Event Types":
+
+  test "event type constants match driver":
+    check EVENT_TYPE_PROCESS_CREATE == ULONG(1)
+    check EVENT_TYPE_PROCESS_EXIT   == ULONG(2)
+    check EVENT_TYPE_THREAD_CREATE  == ULONG(3)
+    check EVENT_TYPE_THREAD_EXIT    == ULONG(4)
+    check EVENT_TYPE_LSASS_ACCESS   == ULONG(5)
+
+suite "Driver ABI - Field Offsets":
+
+  test "EdrEvent.eventType at offset 0":
+    var ev: EdrEvent
+    let base = cast[uint](addr ev)
+    let field = cast[uint](addr ev.eventType)
+    check field - base == 0
+
+  test "EdrEvent.timestamp at offset 4":
+    var ev: EdrEvent
+    let base = cast[uint](addr ev)
+    let field = cast[uint](addr ev.timestamp)
+    check field - base == 4
+
+  test "EdrEvent.processId at offset 12":
+    var ev: EdrEvent
+    let base = cast[uint](addr ev)
+    let field = cast[uint](addr ev.processId)
+    check field - base == 12
+
+  test "EdrEvent.blocked at offset 36":
+    # 4 + 8 + 8 + 8 + 8 = 36
+    var ev: EdrEvent
+    let base = cast[uint](addr ev)
+    let field = cast[uint](addr ev.blocked)
+    check field - base == 36
+
+  test "EdrEvent.imageFileName at offset 37":
+    # 36 + 1 = 37
+    var ev: EdrEvent
+    let base = cast[uint](addr ev)
+    let field = cast[uint](addr ev.imageFileName)
+    check field - base == 37
+
+  test "EdrEvent.commandLine at offset 557":
+    # 37 + 260*2 = 37 + 520 = 557
+    var ev: EdrEvent
+    let base = cast[uint](addr ev)
+    let field = cast[uint](addr ev.commandLine)
+    check field - base == 557
+
+  test "EdrCommand.action at offset 0":
+    var cmd: EdrCommand
+    let base = cast[uint](addr cmd)
+    let field = cast[uint](addr cmd.action)
+    check field - base == 0
+
+  test "EdrCommand.processId at offset 4":
+    var cmd: EdrCommand
+    let base = cast[uint](addr cmd)
+    let field = cast[uint](addr cmd.processId)
+    check field - base == 4
+
+  test "BlockRuleEntry.imageSuffix at offset 0":
+    var rule: BlockRuleEntry
+    let base = cast[uint](addr rule)
+    let field = cast[uint](addr rule.imageSuffix)
+    check field - base == 0
+
+  test "BlockRuleEntry.cmdLineSubstr at offset 520":
+    var rule: BlockRuleEntry
+    let base = cast[uint](addr rule)
+    let field = cast[uint](addr rule.cmdLineSubstr)
+    check field - base == 520

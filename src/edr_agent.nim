@@ -2,7 +2,7 @@
 ## A deliberately weak Endpoint Detection & Response agent
 ## for learning EDR evasion techniques.
 ##
-## Usage: edr_agent.exe [--verbose] [--no-kill] [--interval MS] [--profile NAME]
+## Usage: edr_agent.exe [--verbose] [--no-kill] [--interval MS] [--profile NAME] [--driver]
 ##
 ## This agent monitors new processes via user-mode polling and
 ## applies intentionally weak detection rules. Each weakness
@@ -61,6 +61,7 @@ type
     verbose: bool
     noKill: bool
     noEtw: bool
+    useDriver: bool
     pollInterval: int
     profile: HookProfile
     sigFile: string
@@ -1244,6 +1245,208 @@ proc rulePeStructure(info: ProcessInfo): seq[Detection] =
     )
 
 # ============================================================
+# Kernel Driver Communication
+#
+# When --driver is active, the agent connects to the kernel
+# driver via \\.\MostShittyEDR and switches from user-mode
+# polling to event-driven monitoring with kernel callbacks.
+#
+# WEAKNESS: Device name is hardcoded and discoverable (\\.\MostShittyEDR)
+# WEAKNESS: Single-slot IRP design — only one agent can connect
+# WEAKNESS: Block rules still use case-sensitive suffix matching
+# ============================================================
+
+const
+  IOCTL_WAIT_FOR_EVENT    = DWORD(0x222000)
+  IOCTL_KILL_PROCESS      = DWORD(0x222004)
+  IOCTL_ADD_BLOCK_RULE    = DWORD(0x222008)
+  IOCTL_CLEAR_BLOCK_RULES = DWORD(0x22200C)
+  IOCTL_SIGNAL_LSASS_DUMP = DWORD(0x222010)
+
+  EVENT_TYPE_PROCESS_CREATE = ULONG(1)
+  EVENT_TYPE_PROCESS_EXIT   = ULONG(2)
+  EVENT_TYPE_THREAD_CREATE  = ULONG(3)
+  EVENT_TYPE_THREAD_EXIT    = ULONG(4)
+  EVENT_TYPE_LSASS_ACCESS   = ULONG(5)
+
+type
+  EdrEvent {.packed.} = object
+    eventType: ULONG
+    timestamp: int64
+    processId: uint64
+    threadId: uint64
+    parentProcessId: uint64
+    blocked: byte
+    imageFileName: array[260, WCHAR]
+    commandLine: array[512, WCHAR]
+
+  EdrCommand {.packed.} = object
+    action: ULONG
+    processId: uint64
+
+  BlockRuleEntry {.packed.} = object
+    imageSuffix: array[260, WCHAR]
+    cmdLineSubstr: array[512, WCHAR]
+
+var
+  gDriverHandle: HANDLE = INVALID_HANDLE_VALUE
+  gDriverEvent: HANDLE = 0
+
+proc strToWcharArray(s: string, dest: var openArray[WCHAR]) =
+  for i in 0 ..< dest.len:
+    dest[i] = 0
+  for i in 0 ..< min(s.len, dest.len - 1):
+    dest[i] = WCHAR(ord(s[i]))
+
+proc openDriver(): bool =
+  var devName = newWideCString(r"\\.\MostShittyEDR")
+  gDriverHandle = CreateFileW(
+    devName,
+    GENERIC_READ or GENERIC_WRITE,
+    0,
+    nil,
+    OPEN_EXISTING,
+    FILE_FLAG_OVERLAPPED,
+    0
+  )
+  if gDriverHandle == INVALID_HANDLE_VALUE:
+    return false
+  gDriverEvent = CreateEvent(nil, WINBOOL(0), WINBOOL(0), nil)
+  if gDriverEvent == 0:
+    CloseHandle(gDriverHandle)
+    gDriverHandle = INVALID_HANDLE_VALUE
+    return false
+  return true
+
+proc closeDriver() =
+  if gDriverHandle != INVALID_HANDLE_VALUE:
+    discard CancelIoEx(gDriverHandle, nil)
+    CloseHandle(gDriverHandle)
+    gDriverHandle = INVALID_HANDLE_VALUE
+  if gDriverEvent != 0:
+    CloseHandle(gDriverEvent)
+    gDriverEvent = 0
+
+proc driverClearRules(): bool =
+  var bytesReturned: DWORD = 0
+  return DeviceIoControl(
+    gDriverHandle, IOCTL_CLEAR_BLOCK_RULES,
+    nil, 0, nil, 0,
+    addr bytesReturned, nil
+  ) != 0
+
+proc driverAddBlockRule(imageSuffix: string, cmdLineSubstr: string = ""): bool =
+  var rule: BlockRuleEntry
+  strToWcharArray(imageSuffix, rule.imageSuffix)
+  strToWcharArray(cmdLineSubstr, rule.cmdLineSubstr)
+  var bytesReturned: DWORD = 0
+  let ok = DeviceIoControl(
+    gDriverHandle, IOCTL_ADD_BLOCK_RULE,
+    addr rule, DWORD(sizeof(rule)),
+    nil, 0,
+    addr bytesReturned, nil
+  )
+  if ok != 0:
+    setColor(clGreen)
+    echo "[+] Block rule: ", imageSuffix, if cmdLineSubstr.len > 0: " + " & cmdLineSubstr else: ""
+    setColor(clReset)
+    return true
+  setColor(clRed)
+  echo "[-] Failed to add block rule (err=", GetLastError(), ")"
+  setColor(clReset)
+  return false
+
+proc driverPushBlockRules(): int =
+  discard driverClearRules()
+  result = 0
+  for name in BlacklistedProcesses:
+    if driverAddBlockRule(name):
+      inc result
+  if driverAddBlockRule("cmd.exe", "whoami"): inc result
+  if driverAddBlockRule("cmd.exe", "net user"): inc result
+  if driverAddBlockRule("cmd.exe", "net group"): inc result
+  if driverAddBlockRule("powershell.exe", "mimikatz"): inc result
+  if driverAddBlockRule("powershell.exe", "sekurlsa"): inc result
+
+proc driverKillProcess(pid: DWORD): bool =
+  var cmd = EdrCommand(action: ULONG(1), processId: uint64(pid))
+  var bytesReturned: DWORD = 0
+  let ok = DeviceIoControl(
+    gDriverHandle, IOCTL_KILL_PROCESS,
+    addr cmd, DWORD(sizeof(cmd)),
+    nil, 0,
+    addr bytesReturned, nil
+  )
+  if ok == 0:
+    setColor(clRed)
+    echo "[-] Failed to kill process ", pid, " (err=", GetLastError(), ")"
+    setColor(clReset)
+    return false
+  setColor(clGreen)
+  echo "[+] Kill command sent for PID ", pid
+  setColor(clReset)
+  return true
+
+proc driverSignalLsassDump(pid: DWORD): bool =
+  var cmd = EdrCommand(action: ULONG(1), processId: uint64(pid))
+  var bytesReturned: DWORD = 0
+  let ok = DeviceIoControl(
+    gDriverHandle, IOCTL_SIGNAL_LSASS_DUMP,
+    addr cmd, DWORD(sizeof(cmd)),
+    nil, 0,
+    addr bytesReturned, nil
+  )
+  if ok == 0:
+    setColor(clRed)
+    echo "[-] Failed to signal LSASS dump for PID ", pid, " (err=", GetLastError(), ")"
+    setColor(clReset)
+    return false
+  setColor(clMagenta)
+  echo "[+] LSASS dump signal sent to kernel for PID ", pid
+  setColor(clReset)
+  return true
+
+type WaitEventResult = enum
+  werOk, werBusy, werError
+
+proc driverWaitForEvent(evt: var EdrEvent): WaitEventResult =
+  var bytesReturned: DWORD = 0
+  var ov: OVERLAPPED
+  zeroMem(addr ov, sizeof(ov))
+  ov.hEvent = gDriverEvent
+
+  let ok = DeviceIoControl(
+    gDriverHandle, IOCTL_WAIT_FOR_EVENT,
+    nil, 0,
+    addr evt, DWORD(sizeof(evt)),
+    addr bytesReturned, addr ov
+  )
+
+  if ok != 0:
+    return werOk
+
+  let err = GetLastError()
+
+  if err == ERROR_IO_PENDING:
+    if GetOverlappedResult(gDriverHandle, addr ov, addr bytesReturned, WINBOOL(1)) != 0:
+      return werOk
+    return werError
+
+  if err == ERROR_BUSY:
+    return werBusy
+
+  return werError
+
+proc eventToProcessInfo(evt: EdrEvent): ProcessInfo =
+  ProcessInfo(
+    pid: DWORD(evt.processId),
+    parentPid: DWORD(evt.parentProcessId),
+    exeName: wcharToStr(evt.imageFileName),
+    commandLine: wcharToStr(evt.commandLine),
+    imagePath: ""
+  )
+
+# ============================================================
 # Analysis Engine
 # ============================================================
 
@@ -1274,7 +1477,9 @@ proc analyzeProcess(info: ProcessInfo, cfg: Config): seq[Detection] =
 # Response Engine
 # ============================================================
 
-proc killProcess(pid: DWORD): bool =
+proc killProcess(pid: DWORD, useDriver: bool = false): bool =
+  if useDriver and gDriverHandle != INVALID_HANDLE_VALUE:
+    return driverKillProcess(pid)
   let h = OpenProcess(PROCESS_TERMINATE, WINBOOL(0), pid)
   if h == 0: return false
   defer: CloseHandle(h)
@@ -1305,14 +1510,20 @@ proc respond(info: ProcessInfo, detections: seq[Detection], cfg: Config) =
 
     if det.severity == sCritical and not cfg.noKill:
       setColor(clRed)
-      echo "             [ACTION] Terminating PID ", info.pid
-      if killProcess(info.pid):
+      if cfg.useDriver:
+        echo "             [ACTION] Kernel-terminating PID ", info.pid
+      else:
+        echo "             [ACTION] Terminating PID ", info.pid
+      if killProcess(info.pid, cfg.useDriver):
         inc gStats.kills
         setColor(clGreen)
         echo "             [+] Process terminated successfully"
       else:
         setColor(clRed)
         echo "             [-] Termination failed (err=", GetLastError(), ")"
+
+    if cfg.useDriver and det.ruleId == 4:
+      discard driverSignalLsassDump(info.pid)
 
     setColor(clReset)
 
@@ -1335,7 +1546,10 @@ proc displayBanner(cfg: Config) =
   echo ""
   setColor(clGreen)
   echo "  Version: ", Version
-  echo "  Mode:    User-mode process monitoring (no driver required)"
+  if cfg.useDriver:
+    echo "  Mode:    Kernel-mode (driver connected via \\\\.\\MostShittyEDR)"
+  else:
+    echo "  Mode:    User-mode process monitoring (no driver required)"
   echo ""
   setColor(clCyan)
   echo "  Detection Rules:"
@@ -1394,11 +1608,15 @@ proc showHelp() =
   echo "  --list-profiles      Show available hook profiles"
   echo "  --signatures FILE    Load malware hash signatures for Rule 6"
   echo "                       Format: one SHA256 per line (# comments allowed)"
+  echo r"  --driver             Connect to kernel driver (\\.\MostShittyEDR)"
+  echo "                       Enables: kernel callbacks, kernel-level kill,"
+  echo "                       LSASS handle guard, block rule enforcement"
   echo "  --no-etw             Disable ETW telemetry provider and Rule 8"
   echo "  --help, -h           Show this help"
   echo ""
   echo "Examples:"
   echo "  edr_agent.exe --verbose --no-kill"
+  echo "  edr_agent.exe --driver --verbose"
   echo "  edr_agent.exe --profile crowdstrike"
   echo "  edr_agent.exe --profile carbonblack --verbose"
   echo ""
@@ -1413,6 +1631,7 @@ proc parseConfig(): Config =
     verbose: false,
     noKill: false,
     noEtw: false,
+    useDriver: false,
     pollInterval: DefaultPollMs,
     profile: HookProfile(name: "", hookedApis: @[]),
     sigFile: ""
@@ -1428,6 +1647,7 @@ proc parseConfig(): Config =
       of "verbose", "v": result.verbose = true
       of "no-kill", "n": result.noKill = true
       of "no-etw": result.noEtw = true
+      of "driver", "d": result.useDriver = true
       of "interval", "i":
         result.pollInterval = parseInt(p.val)
         if result.pollInterval < 50:
@@ -1455,39 +1675,123 @@ proc parseConfig(): Config =
 # Main
 # ============================================================
 
-proc main() =
-  let cfg = parseConfig()
+proc displayEvent(evt: EdrEvent, cfg: Config) =
+  let eventName = case evt.eventType
+    of EVENT_TYPE_PROCESS_CREATE: "PROCESS_CREATE"
+    of EVENT_TYPE_PROCESS_EXIT:   "PROCESS_EXIT"
+    of EVENT_TYPE_THREAD_CREATE:  "THREAD_CREATE"
+    of EVENT_TYPE_THREAD_EXIT:    "THREAD_EXIT"
+    of EVENT_TYPE_LSASS_ACCESS:   "LSASS_ACCESS"
+    else: "UNKNOWN"
 
-  # Load malware signatures before banner (so count shows up)
-  if cfg.sigFile.len > 0:
-    let count = loadSignatures(cfg.sigFile)
-    if count == 0:
-      setColor(clYellow)
-      echo "[WARN] No valid signatures loaded from: ", cfg.sigFile
-      setColor(clReset)
+  let eventColor = case evt.eventType
+    of EVENT_TYPE_PROCESS_CREATE:
+      if evt.blocked != 0: clRed else: clGreen
+    of EVENT_TYPE_PROCESS_EXIT: clYellow
+    of EVENT_TYPE_THREAD_CREATE, EVENT_TYPE_THREAD_EXIT: clCyan
+    of EVENT_TYPE_LSASS_ACCESS: clMagenta
+    else: clReset
 
-  displayBanner(cfg)
+  let icon = case evt.eventType
+    of EVENT_TYPE_PROCESS_CREATE:
+      if evt.blocked != 0: "[BLOCKED]" else: "[CREATE] "
+    of EVENT_TYPE_PROCESS_EXIT:   "[EXIT]   "
+    of EVENT_TYPE_THREAD_CREATE:  "[THREAD+]"
+    of EVENT_TYPE_THREAD_EXIT:    "[THREAD-]"
+    of EVENT_TYPE_LSASS_ACCESS:   "[LSASS!] "
+    else: "[EVENT]  "
 
-  SetConsoleCtrlHandler(ctrlHandler, WINBOOL(1))
+  let imageName = wcharToStr(evt.imageFileName)
+  let cmdLine = wcharToStr(evt.commandLine)
 
-  # Initialize ETW telemetry
-  if not cfg.noEtw:
-    if initEtwProvider():
-      setColor(clGreen)
-      echo "[", ts(), "] ETW provider registered"
-    else:
-      setColor(clYellow)
-      echo "[", ts(), "] ETW provider registration failed"
+  setColor(eventColor)
+  echo icon, " ", ts(), " | PID: ", evt.processId, " | Type: ", eventName,
+    if imageName.len > 0: " | Image: " & imageName else: ""
 
-    if startEtwSession():
-      setColor(clGreen)
-      echo "[", ts(), "] ETW session '", EtwSessionName, "' active"
-    else:
-      setColor(clYellow)
-      echo "[", ts(), "] ETW session start failed (need admin?)"
+  if evt.eventType == EVENT_TYPE_PROCESS_CREATE and cmdLine.len > 0:
+    echo "                        CmdLine: ", cmdLine
 
-  # Take initial process snapshot (don't analyze existing processes)
-  # WEAKNESS: processes running before EDR starts are invisible (Challenge 11)
+  if evt.eventType == EVENT_TYPE_LSASS_ACCESS:
+    echo "                        LSASS access stripped"
+
+  if evt.blocked != 0:
+    setColor(clRed)
+    echo "                        [BLOCKED BY KERNEL]"
+
+  setColor(clReset)
+
+proc analyzeDriverEvent(evt: EdrEvent, cfg: Config) =
+  displayEvent(evt, cfg)
+
+  if evt.eventType == EVENT_TYPE_PROCESS_CREATE:
+    inc gStats.seen
+    var info = eventToProcessInfo(evt)
+    info.imagePath = getProcessImagePath(DWORD(evt.processId))
+
+    if evt.blocked != 0:
+      inc gStats.kills
+
+    let detections = analyzeProcess(info, cfg)
+    if detections.len > 0:
+      respond(info, detections, cfg)
+
+proc runDriverLoop(cfg: Config) =
+  setColor(clCyan)
+  echo "[", ts(), "] Connecting to kernel driver..."
+
+  if not openDriver():
+    setColor(clRed)
+    echo "[", ts(), "] Failed to open \\\\.\\MostShittyEDR (err=", GetLastError(), ")"
+    echo "             Is the driver loaded? (sc start MostShittyEDR)"
+    echo "             Running as Administrator?"
+    setColor(clReset)
+    quit(1)
+
+  setColor(clGreen)
+  echo "[", ts(), "] Device opened successfully"
+
+  setColor(clCyan)
+  echo "[", ts(), "] Initializing block rules..."
+  let ruleCount = driverPushBlockRules()
+  setColor(clMagenta)
+  echo "[", ts(), "] ", ruleCount, " block rules active in kernel"
+
+  echo ""
+  setColor(clCyan)
+  echo "[", ts(), "] Listening for events (Ctrl+C to stop)"
+  echo "============================================================"
+  setColor(clReset)
+  echo ""
+
+  while gRunning:
+    var evt: EdrEvent
+    zeroMem(addr evt, sizeof(evt))
+
+    let res = driverWaitForEvent(evt)
+    case res
+    of werOk:
+      analyzeDriverEvent(evt, cfg)
+    of werBusy:
+      Sleep(DWORD(10))
+      continue
+    of werError:
+      if gRunning:
+        setColor(clRed)
+        echo "[-] DeviceIoControl failed: ", GetLastError()
+        setColor(clReset)
+      break
+
+  echo ""
+  setColor(clYellow)
+  echo "[+] Cleaning up..."
+  setColor(clReset)
+
+  discard driverClearRules()
+  closeDriver()
+  setColor(clGreen)
+  echo "[+] Driver disconnected, block rules cleared"
+
+proc runPollingLoop(cfg: Config) =
   let initial = enumerateProcesses()
   gKnownPids = initHashSet[DWORD]()
   for p in initial:
@@ -1510,10 +1814,8 @@ proc main() =
   setColor(clReset)
   echo ""
 
-  # Main monitoring loop
   var etwCheckCounter = 0
   while gRunning:
-    # ETW integrity check every 10 cycles
     if not cfg.noEtw:
       inc etwCheckCounter
       if etwCheckCounter >= 10:
@@ -1542,6 +1844,40 @@ proc main() =
 
     gKnownPids = newKnown
     Sleep(DWORD(cfg.pollInterval))
+
+proc main() =
+  let cfg = parseConfig()
+
+  if cfg.sigFile.len > 0:
+    let count = loadSignatures(cfg.sigFile)
+    if count == 0:
+      setColor(clYellow)
+      echo "[WARN] No valid signatures loaded from: ", cfg.sigFile
+      setColor(clReset)
+
+  displayBanner(cfg)
+
+  SetConsoleCtrlHandler(ctrlHandler, WINBOOL(1))
+
+  if not cfg.noEtw:
+    if initEtwProvider():
+      setColor(clGreen)
+      echo "[", ts(), "] ETW provider registered"
+    else:
+      setColor(clYellow)
+      echo "[", ts(), "] ETW provider registration failed"
+
+    if startEtwSession():
+      setColor(clGreen)
+      echo "[", ts(), "] ETW session '", EtwSessionName, "' active"
+    else:
+      setColor(clYellow)
+      echo "[", ts(), "] ETW session start failed (need admin?)"
+
+  if cfg.useDriver:
+    runDriverLoop(cfg)
+  else:
+    runPollingLoop(cfg)
 
   # Shutdown
   echo ""
