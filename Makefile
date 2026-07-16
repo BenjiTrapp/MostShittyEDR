@@ -1,7 +1,9 @@
-.PHONY: build clean install-deps run run-verbose run-safe help
+.PHONY: build clean install-deps run run-verbose run-safe help \
+       test test-nim test-driver-logic test-driver-ioctl
 
 NIM      ?= nim
 NIMBLE   ?= nimble
+CL       ?= cl
 SRC       = src/edr_agent.nim
 OUT       = edr_agent.exe
 NIMFLAGS  = -d:release --opt:size --app:console
@@ -10,15 +12,17 @@ help:
 	@echo "MostShittyEDR - Build Targets"
 	@echo "=============================="
 	@echo ""
-	@echo "  make install-deps  - Install Nim dependencies (winim)"
-	@echo "  make build         - Compile the EDR agent"
-	@echo "  make build-debug   - Compile with debug symbols"
-	@echo "  make run           - Build and run the EDR agent"
-	@echo "  make run-verbose   - Build and run with verbose output"
-	@echo "  make run-safe      - Build and run in detection-only mode"
-	@echo "  make clean         - Remove build artifacts"
-	@echo "  make test          - Run all challenge test scripts"
-	@echo "  make test-cat CAT=N - Run tests for category N"
+	@echo "  make install-deps      - Install Nim dependencies (winim)"
+	@echo "  make build             - Compile the EDR agent"
+	@echo "  make build-debug       - Compile with debug symbols"
+	@echo "  make run               - Build and run the EDR agent"
+	@echo "  make run-verbose       - Build and run with verbose output"
+	@echo "  make run-safe          - Build and run in detection-only mode"
+	@echo "  make clean             - Remove build artifacts"
+	@echo "  make test              - Run all unit tests (Nim + driver logic)"
+	@echo "  make test-nim          - Run Nim agent unit tests"
+	@echo "  make test-driver-logic - Run driver logic tests (user-mode, no driver needed)"
+	@echo "  make test-driver-ioctl - Run driver IOCTL tests (requires loaded driver + Admin)"
 	@echo ""
 
 install-deps:
@@ -45,9 +49,20 @@ clean:
 	rm -rf nimcache/
 	rm -rf src/nimcache/
 
-test:
-	@echo "Run the EDR agent in one terminal, then execute challenge payloads in another."
-	@echo "See challenges/ directory for instructions."
+test: test-nim test-driver-logic
+
+test-nim: install-deps
+	$(NIM) c -r tests/test_rules.nim
+	$(NIM) c -r tests/test_profiles.nim
+
+test-driver-logic:
+	$(CL) /EHsc /W4 tests/test_driver_logic.cpp /Fe:test_driver_logic.exe
+	./test_driver_logic.exe
+
+test-driver-ioctl:
+	$(CL) /EHsc /W4 tests/test_driver_ioctl.cpp /Fe:test_driver_ioctl.exe
+	@echo "NOTE: Requires loaded driver and Administrator privileges"
+	./test_driver_ioctl.exe
 
 test-cat:
 	@echo "Category $(CAT) challenges - see challenges/ directory"

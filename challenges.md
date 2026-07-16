@@ -6,7 +6,7 @@ permalink: /challenges/
 
 # EDR Bypass Challenges
 
-20 challenges across 5 categories. Start with Easy and work your way up.
+28 challenges across 7 categories. Start with Easy and work your way up.
 
 ## Category 1: Process Name Evasion
 
@@ -154,6 +154,70 @@ permalink: /challenges/
 <span class="badge badge-easy">Easy</span>
 <h3>20 - The Empty Hash Database</h3>
 <p>Realize there is no hash-based detection at all</p>
+</a>
+
+</div>
+
+## Category 6: API Hook Evasion
+
+Requires `--profile` flag (e.g. `--profile crowdstrike`). These challenges target Rule 7's static import analysis using real EDR hook profiles from [Mr-Un1k0d3r/EDRs](https://github.com/Mr-Un1k0d3r/EDRs).
+
+<div class="challenge-grid">
+
+<a href="{{ '/challenges/21-dynamic-api-resolution/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>21 - Dynamic API Resolution</h3>
+<p>Use GetProcAddress to resolve hooked APIs at runtime instead of static imports</p>
+</a>
+
+<a href="{{ '/challenges/22-dll-proxy-call/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>22 - DLL Proxy Call</h3>
+<p>Move the hooked API call into a DLL that the scanner doesn't inspect</p>
+</a>
+
+<a href="{{ '/challenges/23-direct-syscalls/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>23 - Direct Syscalls</h3>
+<p>Skip ntdll.dll entirely using Hell's Gate direct syscall technique</p>
+</a>
+
+<a href="{{ '/challenges/24-ntdll-unhooking/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>24 - ntdll.dll Unhooking</h3>
+<p>Restore ntdll.dll from disk to remove all userland hooks undetected</p>
+</a>
+
+</div>
+
+## Category 7: ETW Bypass
+
+Target the EDR's ETW telemetry pipeline. The agent registers a custom ETW provider and trace session — blind it using session manipulation, memory patching, or patchless hooking techniques. See [Breaking ETW and EDR](https://benjitrapp.github.io/attacks/2024-02-11-offensive-etw/) and [ETW-TI Deep Dive](https://benjitrapp.github.io/defenses/2026-06-19-etw-ti/) for background.
+
+<div class="challenge-grid">
+
+<a href="{{ '/challenges/25-kill-etw-session/' | relative_url }}" class="challenge-card">
+<span class="badge badge-easy">Easy</span>
+<h3>25 - Kill the Trace Session</h3>
+<p>Stop the hardcoded ETW trace session to blind the EDR's telemetry</p>
+</a>
+
+<a href="{{ '/challenges/26-patch-etwwrite/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>26 - Patch EtwEventWrite</h3>
+<p>Patch ntdll!EtwEventWrite to silently disable all user-mode ETW without triggering Rule 8</p>
+</a>
+
+<a href="{{ '/challenges/27-provider-unregistration/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>27 - Provider Unregistration</h3>
+<p>Disable the EDR's provider from the trace session while keeping the session alive</p>
+</a>
+
+<a href="{{ '/challenges/28-hardware-breakpoint-hook/' | relative_url }}" class="challenge-card">
+<span class="badge badge-hard">Hard</span>
+<h3>28 - Hardware Breakpoint Hook</h3>
+<p>Use debug registers and a VEH to intercept EtwEventWrite without modifying code bytes</p>
 </a>
 
 </div>

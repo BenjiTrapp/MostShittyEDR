@@ -1,0 +1,14 @@
+NtAllocateVirtualMemory is hooked
+NtCreateThread is hooked
+NtCreateThreadEx is hooked
+NtMapViewOfSection is hooked
+NtOpenProcess is hooked
+NtProtectVirtualMemory is hooked
+NtQueryInformationProcess is hooked
+NtQuerySystemInformation is hooked
+NtQuerySystemTime is hooked
+NtQueueApcThread is hooked
+NtQueueApcThreadEx is hooked
+NtReadVirtualMemory is hooked
+NtUnmapViewOfSection is hooked
+NtWriteVirtualMemory is hooked

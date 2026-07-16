@@ -120,6 +120,8 @@ Minifilters monitor all filesystem I/O through the Filter Manager framework:
 - Operates from `ntoskrnl.exe` kernel callbacks and is immune to user-mode tampering
 - Cannot be disabled without kernel-level access (unlike regular ETW sessions)
 
+ETW is critical enough to deserve its own deep-dive — see [ETW: Event Tracing for Windows](#etw-event-tracing-for-windows) below.
+
 * * *
 
 ## User-Mode Hooking
@@ -177,6 +179,278 @@ EDRs hook these stubs by replacing the first bytes with a `jmp`. Bypass techniqu
 - **Halos Gate** extends Hell's Gate with fallback resolution
 - **Tartarus Gate** handles multiple consecutive hooked functions
 - **SysWhispers** provides compile-time SSN resolution from version tables
+
+* * *
+
+## ETW: Event Tracing for Windows
+
+ETW is the **single most important telemetry source** for modern EDRs on Windows. It provides structured, high-performance event tracing from both user-mode and kernel-mode components. Understanding ETW is essential for both defending and attacking EDR solutions.
+
+For background, see [Breaking ETW and EDR](https://benjitrapp.github.io/attacks/2024-02-11-offensive-etw/) and [ETW-TI Deep Dive](https://benjitrapp.github.io/defenses/2026-06-19-etw-ti/).
+
+### ETW Architecture
+
+ETW is built on three roles: **Providers** generate events, **Controllers** manage trace sessions, and **Consumers** read events.
+
+<pre class="mermaid">
+graph LR
+    subgraph Providers
+        P1["Microsoft-Windows-<br/>Kernel-Process"]
+        P2["Microsoft-Windows-<br/>Threat-Intelligence"]
+        P3["Microsoft-Windows-<br/>DotNETRuntime"]
+        P4["EDR Custom<br/>Provider"]
+    end
+
+    subgraph Controller["Controller (logman / ETW API)"]
+        S1["Trace Session<br/>(real-time or file)"]
+    end
+
+    subgraph Consumers
+        C1["EDR Agent"]
+        C2["Windows<br/>Event Log"]
+        C3["SIEM<br/>Forwarder"]
+    end
+
+    P1 -->|Events| S1
+    P2 -->|Events| S1
+    P3 -->|Events| S1
+    P4 -->|Events| S1
+    S1 -->|Buffered delivery| C1
+    S1 -->|Buffered delivery| C2
+    S1 -->|Buffered delivery| C3
+</pre>
+
+**Key concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Provider** | A component that emits structured events via `EventWrite` / `EtwWrite` |
+| **Session** | A named kernel object that buffers events from enabled providers |
+| **Consumer** | An application that reads events from a session (real-time or from `.etl` files) |
+| **Controller** | Starts/stops sessions and enables/disables providers within them |
+| **Keywords** | Bitmask filters that select which event categories a provider emits |
+| **Level** | Severity filter (Critical=1, Error=2, Warning=3, Info=4, Verbose=5) |
+
+### ETW Providers Used by EDRs
+
+EDRs consume events from multiple built-in Windows providers:
+
+| Provider | GUID | What It Monitors |
+|----------|------|-----------------|
+| `Microsoft-Windows-Kernel-Process` | `{22FB2CD6-...}` | Process creation, exit, image load |
+| `Microsoft-Windows-Kernel-File` | `{EDD08927-...}` | File system operations |
+| `Microsoft-Windows-Kernel-Network` | `{7DD42A49-...}` | TCP/UDP connection events |
+| `Microsoft-Windows-Kernel-Registry` | `{70EB4F03-...}` | Registry key/value operations |
+| `Microsoft-Windows-Threat-Intelligence` | `{F4E1897C-...}` | Cross-process memory ops, injection, code execution |
+| `Microsoft-Windows-DotNETRuntime` | `{E13C0D23-...}` | .NET assembly loading, JIT compilation |
+| `Microsoft-Windows-PowerShell` | `{A0C1853B-...}` | PowerShell script block logging |
+| `Microsoft-Antimalware-Scan-Interface` | `{2A576B87-...}` | AMSI scan events |
+
+EDRs typically also register their **own custom providers** for internal telemetry and diagnostics.
+
+### User-Mode vs Kernel-Mode ETW
+
+This is the most critical distinction for understanding ETW bypass:
+
+<pre class="mermaid">
+graph TB
+    subgraph UserMode["User-Mode ETW (Bypassable)"]
+        App["Application<br/>calls NtXxx()"]
+        NtDll["ntdll.dll<br/>EtwEventWrite()"]
+        App --> NtDll
+        NtDll -.->|"Can be patched<br/>(ret / xor eax,eax;ret)"| Blind["Events<br/>Silenced ❌"]
+    end
+
+    subgraph KernelMode["Kernel-Mode ETW-TI (Protected)"]
+        Syscall["syscall instruction"]
+        Kernel["ntoskrnl.exe<br/>NtWriteVirtualMemory()"]
+        EtwTi["EtwTiLogReadWriteVm()"]
+        Session["ETW-TI Session<br/>(PPL-protected)"]
+        Syscall --> Kernel
+        Kernel --> EtwTi
+        EtwTi -->|"Events fire from<br/>ring 0 — cannot be<br/>patched from user-mode"| Session
+    end
+
+    App -.->|"syscall"| Syscall
+
+    style Blind fill:#c62828,color:#fff
+    style Session fill:#2e7d32,color:#fff
+</pre>
+
+| Property | User-Mode ETW | Kernel-Mode ETW-TI |
+|----------|--------------|-------------------|
+| **Where events fire** | `ntdll.dll` (user-space) | `ntoskrnl.exe` (kernel-space) |
+| **Patchable from user-mode?** | Yes — patch `EtwEventWrite` | No — code is in ring 0 |
+| **Session killable?** | Yes — `logman stop` | No — requires PPL access |
+| **Provider disablable?** | Yes — ETW controller APIs | No — only PPL consumers can subscribe |
+| **Access control** | Admin can manage sessions | **PPL-AM** (Protected Process Light - Antimalware) required |
+| **Bypass difficulty** | Easy to Medium | Requires kernel access (BYOVD, exploit) |
+
+### ETW-TI: The Kernel's Eye
+
+The `Microsoft-Windows-Threat-Intelligence` provider (GUID `{F4E1897C-BB5D-5668-F1D8-040F4D8DD344}`) is a **kernel-mode-only** provider introduced in Windows 10 RS2. Events fire **after the syscall transitions to ring 0**, making them immune to all user-land bypass techniques.
+
+<pre class="mermaid">
+graph TB
+    subgraph Operations["Monitored Operations"]
+        O1["NtAllocateVirtualMemory<br/>(RWX detection)"]
+        O2["NtWriteVirtualMemory<br/>(cross-process write)"]
+        O3["NtMapViewOfSection<br/>(section mapping)"]
+        O4["NtSetContextThread<br/>(thread hijacking)"]
+        O5["NtQueueApcThread<br/>(APC injection)"]
+        O6["NtCreateThreadEx<br/>(remote thread)"]
+        O7["NtProtectVirtualMemory<br/>(permission change)"]
+    end
+
+    subgraph Kernel["ntoskrnl.exe"]
+        ETL["EtwTiLog* Functions"]
+        REG["nt!EtwThreatIntProvRegHandle"]
+    end
+
+    subgraph Consumer["PPL-Protected Consumer"]
+        EDR["EDR Kernel Driver<br/>(ELAM-signed, PPL-AM)"]
+        CORR["Behavioral<br/>Correlation"]
+    end
+
+    O1 & O2 & O3 & O4 & O5 & O6 & O7 --> ETL
+    ETL --> REG
+    REG -->|"Events"| EDR
+    EDR --> CORR
+</pre>
+
+**What ETW-TI captures per event:**
+
+- Calling process ID and target process ID
+- Target virtual address and region size
+- Memory protection flags (`PAGE_EXECUTE_READWRITE` is highly suspicious)
+- Call stack at the point of invocation
+- Whether the call bypassed user-mode hooks (direct syscall detection)
+
+**Behavioral enrichment** — EDRs like Elastic annotate ETW-TI events with labels:
+
+| Label | Meaning |
+|-------|---------|
+| `cross-process` | Source ≠ Target process |
+| `direct_syscall` | Syscall stub was bypassed |
+| `shellcode` | Execution from non-image (unbacked) memory |
+| `unbacked_rwx` | RWX memory not backed by a file on disk |
+| `image-hooked` | Inline hook detected in loaded module |
+
+**Access protection:** Only processes running as `PS_PROTECTED_ANTIMALWARE_LIGHT` (PPL-AM) with an ELAM (Early Launch Antimalware) signed driver can subscribe to ETW-TI. This requires:
+- A valid Microsoft-signed ELAM certificate
+- The driver to load before other third-party drivers at boot
+- `PS_PROTECTION.Type >= PsProtectedTypeProtectedLight`
+- `PS_PROTECTION.Signer >= PsProtectedSignerAntimalware`
+
+### ETW Bypass Techniques
+
+These are the known approaches to blinding ETW telemetry, ordered by difficulty:
+
+<pre class="mermaid">
+graph TB
+    subgraph Easy["Easy (User-Mode)"]
+        B1["logman stop<br/>'Session-Name' -ets"]
+        B2["Patch EtwEventWrite<br/>ret / xor eax,eax;ret"]
+        B3["Provider disable<br/>via controller API"]
+    end
+
+    subgraph Medium["Medium (Advanced User-Mode)"]
+        B4["Hardware breakpoint<br/>on EtwEventWrite"]
+        B5["Unhook ntdll<br/>(restore from disk)"]
+        B6["NtTraceControl<br/>manipulation"]
+    end
+
+    subgraph Hard["Hard (Kernel-Mode)"]
+        B7["BYOVD: zero<br/>EtwThreatIntProvRegHandle"]
+        B8["Kernel exploit<br/>disable EPROCESS flags"]
+        B9["Callback removal<br/>via kernel R/W"]
+    end
+
+    subgraph Mitigations["Defenses"]
+        D1["ETW-TI<br/>(immune to user-mode)"]
+        D2["PatchGuard<br/>(detects kernel tampering)"]
+        D3["PPL<br/>(protects EDR process)"]
+    end
+
+    Easy -.->|"Blocked by"| D1
+    Medium -.->|"Blocked by"| D1
+    Hard -.->|"Detected by"| D2
+    
+    style Easy fill:#1b5e20,color:#fff
+    style Medium fill:#e65100,color:#fff
+    style Hard fill:#b71c1c,color:#fff
+    style Mitigations fill:#1565c0,color:#fff
+</pre>
+
+#### 1. Kill the Trace Session (Easy)
+
+```powershell
+logman stop "EDR-Session-Name" -ets
+```
+
+Requires admin, but session names are often discoverable via `logman query -ets`. See [Challenge 25](/challenges/25-kill-etw-session/).
+
+#### 2. Patch EtwEventWrite (Easy-Medium)
+
+```c
+// Patch ntdll!EtwEventWrite to return SUCCESS without logging
+BYTE patch[] = { 0x33, 0xC0, 0xC3 };  // xor eax, eax; ret
+void* addr = GetProcAddress(GetModuleHandleA("ntdll.dll"), "EtwEventWrite");
+DWORD old;
+VirtualProtect(addr, 3, PAGE_EXECUTE_READWRITE, &old);
+memcpy(addr, patch, 3);
+VirtualProtect(addr, 3, old, &old);
+```
+
+This blinds **all** user-mode ETW providers in the patched process. See [Challenge 26](/challenges/26-patch-etwwrite/).
+
+#### 3. Provider Unregistration (Medium)
+
+Disable a specific provider from a session using `EnableTraceEx2` with `EVENT_CONTROL_CODE_DISABLE_PROVIDER`. The session remains running but stops collecting from the targeted provider. See [Challenge 27](/challenges/27-provider-unregistration/).
+
+#### 4. Hardware Breakpoint Hook (Hard)
+
+Use CPU debug registers (DR0-DR3) and a Vectored Exception Handler to intercept `EtwEventWrite` without modifying code bytes — evading memory integrity checks entirely. See [Challenge 28](/challenges/28-hardware-breakpoint-hook/).
+
+#### 5. Kernel-Mode Bypass (Expert)
+
+The only way to bypass ETW-TI is with **kernel-level access**:
+
+- **BYOVD** (Bring Your Own Vulnerable Driver): Load a signed driver with known vulnerabilities, use it to zero `nt!EtwThreatIntProvRegHandle` — but PatchGuard may detect the modification
+- **Kernel exploit**: Direct ring-0 code execution to manipulate EPROCESS logging flags
+- **NtSetInformationProcess** with `ProcessEnableLogging` class (patched in Windows 11, worked on some Windows 10 builds)
+
+> **Key insight:** User-mode ETW bypass (patching `EtwEventWrite`, killing sessions) does NOT affect kernel-mode ETW-TI. Direct syscalls that bypass ntdll hooks still trigger ETW-TI events because they fire from `ntoskrnl.exe`.
+
+### How the ETW Event Pipeline Flows
+
+End-to-end path of a suspicious `NtWriteVirtualMemory` call through an EDR:
+
+<pre class="mermaid">
+sequenceDiagram
+    participant App as Malware
+    participant ntdll as ntdll.dll
+    participant Hook as EDR Hook (user-mode)
+    participant Kernel as ntoskrnl.exe
+    participant TI as EtwTiLogReadWriteVm
+    participant Session as ETW-TI Session
+    participant Driver as EDR Kernel Driver
+    participant Agent as EDR Agent
+
+    App->>ntdll: NtWriteVirtualMemory()
+    ntdll->>Hook: jmp EDR_hook_handler
+    Hook->>Hook: Log arguments (user-mode ETW)
+    Hook->>ntdll: Execute original stub
+    ntdll->>Kernel: syscall (ring 0)
+    Kernel->>TI: Cross-process write detected
+    TI->>Session: EVENT: WriteVm (PID, target, flags, callstack)
+    Session->>Driver: Buffered event delivery
+    Driver->>Agent: Forward to user-mode for correlation
+    Agent->>Agent: Correlate with other events
+    Note over Agent: Write + CreateThread = injection pattern!
+</pre>
+
+Even if the malware patches `EtwEventWrite` (blinding user-mode ETW) or uses direct syscalls (bypassing the hook), the kernel path `Kernel → TI → Session → Driver` still fires.
 
 * * *
 
@@ -276,7 +550,7 @@ This lab deliberately implements each EDR concept in the weakest possible way:
 | Process blocking | Case-sensitive name blacklist | Rename = bypass |
 | LSASS protection | Dual-condition keyword match | Either condition alone = bypass |
 | PowerShell analysis | Checks `powershell.exe` only | `pwsh.exe` is invisible |
-| ETW telemetry | Not implemented | Complete blind spot |
+| ETW telemetry | User-mode provider + session (Rule 8) | No kernel-mode ETW-TI, patchable `EtwEventWrite`, hardcoded session name |
 | Response actions | `discard` on recon detection | Detects but never acts |
 
 * * *

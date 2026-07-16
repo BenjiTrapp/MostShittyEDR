@@ -9,15 +9,15 @@ title: "Home | MostShittyEDR"
   <p class="subtitle">The World's Most Intentionally Terrible EDR — an educational platform for understanding EDR detection and evasion techniques.</p>
   <div class="stats">
     <div class="stat">
-      <div class="stat-number">20</div>
+      <div class="stat-number">28</div>
       <div class="stat-label">Challenges</div>
     </div>
     <div class="stat">
-      <div class="stat-number">5</div>
+      <div class="stat-number">7</div>
       <div class="stat-label">Categories</div>
     </div>
     <div class="stat">
-      <div class="stat-number">20</div>
+      <div class="stat-number">28</div>
       <div class="stat-label">Solutions</div>
     </div>
   </div>
@@ -71,9 +71,27 @@ title: "Home | MostShittyEDR"
     </div>
   </a>
 
+  <a href="{{ '/challenges/#category-6-api-hook-evasion' | relative_url }}" class="card">
+    <div class="card-title">API Hook Evasion</div>
+    <div class="card-description">Bypass static import analysis using dynamic resolution, DLL proxying, direct syscalls, and ntdll unhooking. Uses real EDR hook profiles.</div>
+    <div class="card-meta">
+      <span class="badge badge-category">4 Challenges</span>
+      <span class="badge badge-hard">Medium - Hard</span>
+    </div>
+  </a>
+
+  <a href="{{ '/challenges/#category-7-etw-bypass' | relative_url }}" class="card">
+    <div class="card-title">ETW Bypass</div>
+    <div class="card-description">Blind the EDR's ETW telemetry via session killing, EtwEventWrite patching, provider manipulation, and patchless hardware breakpoint hooks.</div>
+    <div class="card-meta">
+      <span class="badge badge-category">4 Challenges</span>
+      <span class="badge badge-hard">Easy - Hard</span>
+    </div>
+  </a>
+
   <a href="{{ '/challenges/' | relative_url }}" class="card">
     <div class="card-title">Getting Started</div>
-    <div class="card-description">New here? Browse all 20 challenges, pick your difficulty, and start bypassing.</div>
+    <div class="card-description">New here? Browse all 28 challenges, pick your difficulty, and start bypassing.</div>
     <div class="card-meta">
       <span class="badge badge-category">Guide</span>
     </div>
@@ -84,7 +102,7 @@ title: "Home | MostShittyEDR"
 
 ## How It Works
 
-The MostShittyEDR agent implements **6 detection rules** with intentional weaknesses:
+The MostShittyEDR agent implements **8 detection rules** with intentional weaknesses:
 
 | Rule | Method | Action | Exploitable? |
 |------|--------|--------|:---:|
@@ -94,6 +112,8 @@ The MostShittyEDR agent implements **6 detection rules** with intentional weakne
 | 4 | LSASS Dump Detection (dual condition) | **BLOCKS** | Yes |
 | 5 | PowerShell Analysis (flags) | **BLOCKS** | Yes |
 | 6 | Hash-Based Detection (empty DB) | `discard` | Yes |
+| 7 | Hooked API Import Detection | **ALERTS** | Yes |
+| 8 | ETW Integrity Check | **BLOCKS** | Yes |
 
 > **Note:** This is NOT production security software. It is an educational tool designed for understanding EDR evasion techniques in a safe, controlled environment.
 
