@@ -9,15 +9,15 @@ title: "Home | MostShittyEDR"
   <p class="subtitle">The World's Most Intentionally Terrible EDR — an educational platform for understanding EDR detection and evasion techniques.</p>
   <div class="stats">
     <div class="stat">
-      <div class="stat-number">39</div>
+      <div class="stat-number">42</div>
       <div class="stat-label">Challenges</div>
     </div>
     <div class="stat">
-      <div class="stat-number">10</div>
+      <div class="stat-number">11</div>
       <div class="stat-label">Categories</div>
     </div>
     <div class="stat">
-      <div class="stat-number">39</div>
+      <div class="stat-number">42</div>
       <div class="stat-label">Solutions</div>
     </div>
   </div>
@@ -116,9 +116,18 @@ title: "Home | MostShittyEDR"
     </div>
   </a>
 
+  <a href="{{ '/challenges/#category-11-ioctl-abuse' | relative_url }}" class="card">
+    <div class="card-title">IOCTL Abuse</div>
+    <div class="card-description">Weaponize the EDR's own unprotected driver device — kill the agent, poison block rules, or steal the event channel. No external driver needed.</div>
+    <div class="card-meta">
+      <span class="badge badge-category">3 Challenges</span>
+      <span class="badge badge-medium">Medium</span>
+    </div>
+  </a>
+
   <a href="{{ '/challenges/' | relative_url }}" class="card">
     <div class="card-title">Getting Started</div>
-    <div class="card-description">New here? Browse all 39 challenges, pick your difficulty, and start bypassing.</div>
+    <div class="card-description">New here? Browse all 42 challenges, pick your difficulty, and start bypassing.</div>
     <div class="card-meta">
       <span class="badge badge-category">Guide</span>
     </div>

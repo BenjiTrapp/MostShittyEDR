@@ -24,7 +24,7 @@
 
 ## Overview
 
-**MostShittyEDR** is a deliberately weak EDR agent designed for **security research**, **education**, and **red team training**. It implements detection methods that mirror real-world EDR engines but with intentional weaknesses mapped to **39 bypass challenges** across **10 categories**.
+**MostShittyEDR** is a deliberately weak EDR agent designed for **security research**, **education**, and **red team training**. It implements detection methods that mirror real-world EDR engines but with intentional weaknesses mapped to **42 bypass challenges** across **11 categories**.
 
 The project has two operating modes:
 - **User-mode** (default) — polls processes via Toolhelp32 snapshots
@@ -186,8 +186,14 @@ sc.exe start MostShittyEDR
 # 3. Run the agent with --driver
 .\edr_agent.exe --driver --verbose
 
-# Uninstall
+# Uninstall driver only
 .\install_driver.ps1 -Uninstall
+
+# Uninstall everything (agent + driver)
+.\uninstall.ps1
+
+# Uninstall everything + remove build artifacts
+.\uninstall.ps1 -Clean
 ```
 
 ### User-mode vs Kernel-mode
@@ -221,6 +227,8 @@ sc.exe start MostShittyEDR
 - :unlock: ETW session has hardcoded name, patchable `EtwEventWrite`
 - :unlock: PE analysis has no entropy check, strict parser crashes on corrupted headers
 - :unlock: Polling-based monitoring has timing gaps (without `--driver`)
+- :unlock: Driver device has no access control — any process can send IOCTLs
+- :unlock: Single-slot event delivery is monopolizable (DoS)
 
 ### Challenge Categories
 
@@ -236,8 +244,9 @@ sc.exe start MostShittyEDR
 | **Signature Bypass** | 29-32 | Easy-Hard | Rule 6 |
 | **Packer & PE Evasion** | 33-36 | Medium-Hard | Rule 9 |
 | **BYOVD / Kernel Attacks** | 37-39 | Hard | Kernel Driver |
+| **IOCTL Abuse** | 40-42 | Medium | Kernel Driver |
 
-**39 challenges** with full solutions at the [Challenge Browser](https://benjitrapp.github.io/MostShittyEDR/challenges/).
+**42 challenges** with full solutions at the [Challenge Browser](https://benjitrapp.github.io/MostShittyEDR/challenges/).
 
 ---
 
@@ -318,9 +327,10 @@ MostShittyEDR/
 ├── profiles/                      # Real EDR hook profiles
 ├── signatures/
 │   └── malware_hashes.txt         # SHA256 signature database
-├── _challenges/                   # 39 bypass challenges
+├── _challenges/                   # 42 bypass challenges
 ├── _solutions/                    # Detailed solution walkthroughs
 ├── install_driver.ps1             # Driver install/uninstall script
+├── uninstall.ps1                  # Full uninstall (agent + driver + cleanup)
 ├── Makefile                       # Build automation
 └── MostShittyEDR.nimble           # Nim package config
 ```

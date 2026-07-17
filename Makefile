@@ -1,5 +1,5 @@
 .PHONY: build clean install-deps run run-verbose run-safe run-driver help \
-       test test-nim test-driver-logic test-driver-ioctl
+       test test-nim test-driver-logic test-driver-ioctl uninstall
 
 NIM      ?= nim
 NIMBLE   ?= nimble
@@ -19,6 +19,7 @@ help:
 	@echo "  make run-verbose       - Build and run with verbose output"
 	@echo "  make run-safe          - Build and run in detection-only mode"
 	@echo "  make run-driver        - Build and run with kernel driver (requires Admin)"
+	@echo "  make uninstall         - Uninstall agent + driver (requires Admin)"
 	@echo "  make clean             - Remove build artifacts"
 	@echo "  make test              - Run all unit tests (Nim + driver logic)"
 	@echo "  make test-nim          - Run Nim agent unit tests"
@@ -53,6 +54,10 @@ clean:
 	rm -f src/edr_agent
 	rm -rf nimcache/
 	rm -rf src/nimcache/
+
+uninstall:
+	@echo "Uninstalling agent + driver..."
+	powershell -ExecutionPolicy Bypass -File uninstall.ps1 -Force
 
 test: test-nim test-driver-logic
 

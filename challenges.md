@@ -6,7 +6,7 @@ permalink: /challenges/
 
 # EDR Bypass Challenges
 
-39 challenges across 10 categories. Start with Easy and work your way up.
+42 challenges across 11 categories. Start with Easy and work your way up.
 
 ## Category 1: Process Name Evasion
 
@@ -308,6 +308,32 @@ Bring Your Own Vulnerable Driver — load a legitimately signed driver with dang
 <span class="badge badge-hard">Hard</span>
 <h3>39 - BYOVD: Blind ETW-TI</h3>
 <p>Disable the kernel-level ETW Threat Intelligence provider via vulnerable driver R/W</p>
+</a>
+
+</div>
+
+## Category 11: IOCTL Abuse
+
+The EDR's own kernel driver exposes an unprotected device (`\\.\MostShittyEDR`) — no DACL, no caller verification, `FILE_ANY_ACCESS` on destructive IOCTLs. Weaponize the driver against itself: kill the agent, poison its block rules, or steal its event channel. No external driver needed.
+
+<div class="challenge-grid">
+
+<a href="{{ '/challenges/40-ioctl-hijack-kill/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>40 - IOCTL Hijack: Kill via EDR</h3>
+<p>Open the unprotected device and terminate the agent with its own IOCTL_KILL_PROCESS</p>
+</a>
+
+<a href="{{ '/challenges/41-block-rule-poisoning/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>41 - Block Rule Poisoning</h3>
+<p>Push a kernel block rule targeting edr_agent.exe — it can never restart</p>
+</a>
+
+<a href="{{ '/challenges/42-event-channel-dos/' | relative_url }}" class="challenge-card">
+<span class="badge badge-medium">Medium</span>
+<h3>42 - Event Channel DoS</h3>
+<p>Monopolize the single-slot PendingIrp to starve the agent — steal all kernel events</p>
 </a>
 
 </div>
